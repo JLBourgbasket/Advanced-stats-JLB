@@ -128,6 +128,7 @@ body {
 
 .good-chip,
 .bad-chip,
+.watch-chip,
 .score-chip {
   display: inline-flex;
   align-items: center;
@@ -141,6 +142,7 @@ body {
 
 .good-chip { border-color: #a7d8c1; background: #ecfdf5; color: #166534; }
 .bad-chip { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+.watch-chip { border-color: #f6d58b; background: #fffbeb; color: #92400e; }
 .score-chip { border-color: #d6d0c5; background: #f7f5f0; color: #1c1917; font-size: 0.9rem; }
 
 @media print {

@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import {
   Activity,
   BarChart3,
+  Camera,
   Check,
   ChevronRight,
   CircleAlert,
@@ -13,6 +15,7 @@ import {
   Gauge,
   Info,
   Printer,
+  Radio,
   ShieldCheck,
   Target,
   Users,
@@ -29,6 +32,7 @@ import {
 } from "recharts";
 
 import { Button } from "@/components/ui/button";
+import { AdminAccess } from "@/components/admin-access";
 import {
   Table,
   TableBody,
@@ -40,7 +44,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
-import type { MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
+import { loadLatestPublishedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
+import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
 
 const statusStyles: Record<MetricStatus, { dot: string; text: string; bg: string; border: string; label: string }> = {
   good: { dot: "bg-emerald-600", text: "text-emerald-800", bg: "bg-emerald-50", border: "border-emerald-200", label: "Cible atteinte" },
@@ -176,7 +181,7 @@ function Box({ label, value }: { label: string; value: string }) {
   return <div><div className="text-[10px] font-bold tracking-[0.1em] text-stone-400">{label}</div><div className="mt-1 font-black tabular-nums">{value}</div></div>;
 }
 
-function TeamPanel({ metrics }: { metrics: TeamMetrics }) {
+function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxscore }) {
   const statuses = teamTargets.map((target) => metricStatus(metricValue(metrics, target.key), target));
   const good = statuses.filter((status) => status === "good").length;
   const red = statuses.filter((status) => status === "bad").length;
@@ -209,7 +214,7 @@ function TeamPanel({ metrics }: { metrics: TeamMetrics }) {
           </div>
           <div className="mt-4 h-48 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={genevaMatch.quarters} barGap={4}>
+              <BarChart data={match.quarters} barGap={4}>
                 <CartesianGrid stroke="#e7e3db" vertical={false} />
                 <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={11} />
                 <YAxis axisLine={false} tickLine={false} fontSize={11} width={24} />
@@ -242,11 +247,48 @@ function Insight({ icon, title, value, copy, tone }: { icon: React.ReactNode; ti
 }
 
 export function PerformanceApp() {
-  const metrics = useMemo(() => calculateTeamMetrics(genevaMatch), []);
-  const players = useMemo(() => calculatePlayerMetrics(genevaMatch), []);
+  const [match, setMatch] = useState<MatchBoxscore>(genevaMatch);
+  const [dataMode, setDataMode] = useState("Mode démo · boxscore validé");
+  const [adminAccess, setAdminAccess] = useState<{ user: User | null; isAdmin: boolean }>({ user: null, isAdmin: false });
+  const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
+  const players = useMemo(() => calculatePlayerMetrics(match), [match]);
   const [selectedPlayerId, setSelectedPlayerId] = useState("soliman");
-  const [importMessage, setImportMessage] = useState("Mode démo · boxscore validé");
   const selectedPlayer = players.find((player) => player.id === selectedPlayerId) ?? players[0];
+
+  useEffect(() => {
+    void loadLatestPublishedMatch()
+      .then((storedMatch) => {
+        if (storedMatch) {
+          setMatch(storedMatch);
+          setSelectedPlayerId(storedMatch.players[0]?.id ?? "");
+          setDataMode("Données publiques · Supabase");
+        } else {
+          setDataMode("Mode démo · aucun match publié dans Supabase");
+        }
+      })
+      .catch(() => setDataMode("Mode démo · lecture Supabase indisponible"));
+  }, []);
+
+  const onAccessChange = useCallback((state: { user: User | null; isAdmin: boolean }) => {
+    setAdminAccess(state);
+  }, []);
+
+  const handleImport = async (file?: File) => {
+    if (!file) return;
+    if (!adminAccess.user || !adminAccess.isAdmin) {
+      setDataMode("Import refusé · connexion administrateur requise");
+      return;
+    }
+    setDataMode(`${file.name} · envoi en cours…`);
+    try {
+      const result = await uploadBoxscoreFile(file, adminAccess.user.id);
+      setDataMode(result.convertedToPdf
+        ? `${file.name} · photo convertie en PDF · extraction à valider`
+        : `${file.name} enregistré · extraction à valider`);
+    } catch (error) {
+      setDataMode(error instanceof Error ? `Échec de l’import · ${error.message}` : "Échec de l’import");
+    }
+  };
 
   return (
     <main className="min-h-screen bg-[#f3f0e9] text-stone-950">
@@ -256,13 +298,22 @@ export function PerformanceApp() {
             <div className="grid size-10 place-items-center bg-[#d71920] font-condensed text-lg font-black">JL</div>
             <div><div className="font-condensed text-lg font-black tracking-[0.04em]">PERFORMANCE LAB</div><div className="text-[10px] uppercase tracking-[0.18em] text-stone-400">JL Bourg · Basketball analytics</div></div>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="inline-flex h-9 cursor-pointer items-center gap-2 border border-stone-700 px-3 text-xs font-bold hover:bg-stone-900">
-              <FileUp className="size-4" /> Importer
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <label className={`inline-flex h-9 items-center gap-2 border border-stone-700 px-3 text-xs font-bold ${adminAccess.isAdmin ? "cursor-pointer hover:bg-stone-900" : "cursor-not-allowed opacity-50"}`}>
+              <Camera className="size-4" /> {adminAccess.isAdmin ? "Prendre une photo" : "Photo admin"}
+              <input type="file" className="sr-only" accept="image/*" capture="environment" onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                void handleImport(file);
+              }} disabled={!adminAccess.isAdmin} />
+            </label>
+            <label className={`inline-flex h-9 items-center gap-2 border border-stone-700 px-3 text-xs font-bold ${adminAccess.isAdmin ? "cursor-pointer hover:bg-stone-900" : "cursor-not-allowed opacity-50"}`}>
+              <FileUp className="size-4" /> {adminAccess.isAdmin ? "Choisir un fichier" : "Import admin"}
               <input type="file" className="sr-only" accept="image/*,.pdf,.csv,.xlsx" onChange={(event) => {
                 const file = event.target.files?.[0];
-                if (file) setImportMessage(`${file.name} chargé · validation des données requise`);
-              }} />
+                event.currentTarget.value = "";
+                void handleImport(file);
+              }} disabled={!adminAccess.isAdmin} />
             </label>
             <Button onClick={() => window.print()} className="h-9 rounded-none bg-[#d71920] px-3 text-xs font-bold hover:bg-[#b71017]">
               <Printer className="size-4" /> Exporter PDF
@@ -277,14 +328,14 @@ export function PerformanceApp() {
             <div className="p-5 lg:p-6">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[#d71920]"><span className="size-2 bg-[#d71920]" /> Match analysé</div>
               <div className="mt-3 flex items-end gap-4">
-                <div><p className="text-xs text-stone-500">{genevaMatch.competition} · {genevaMatch.date.split("-").reverse().join("/")}</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{genevaMatch.team.name}</h1></div>
+                <div><p className="text-xs text-stone-500">{match.competition} · {match.date.split("-").reverse().join("/")}</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{match.team.name}</h1></div>
               </div>
             </div>
             <div className="flex items-center justify-center gap-4 border-y border-stone-200 bg-stone-950 px-8 py-5 text-white lg:border-x lg:border-y-0">
-              <span className="font-condensed text-5xl font-black tabular-nums">{genevaMatch.team.points}</span><span className="text-stone-500">—</span><span className="font-condensed text-5xl font-black tabular-nums">{genevaMatch.opponent.points}</span>
+              <span className="font-condensed text-5xl font-black tabular-nums">{match.team.points}</span><span className="text-stone-500">—</span><span className="font-condensed text-5xl font-black tabular-nums">{match.opponent.points}</span>
             </div>
             <div className="flex items-center justify-between gap-4 p-5 lg:justify-end lg:p-6">
-              <div className="lg:text-right"><p className="text-xs text-stone-500">Adversaire</p><h2 className="mt-1 text-xl font-black">{genevaMatch.opponent.name}</h2><p className="mt-2 text-xs text-stone-500">{importMessage}</p></div>
+              <div className="lg:text-right"><p className="text-xs text-stone-500">Adversaire</p><h2 className="mt-1 text-xl font-black">{match.opponent.name}</h2><p className="mt-2 text-xs text-stone-500">{dataMode}</p></div>
               <span className="good-chip"><Check className="size-3.5" /> Données cohérentes</span>
             </div>
           </div>
@@ -298,12 +349,12 @@ export function PerformanceApp() {
             <TabsTrigger value="data" className="flex-none px-3 pb-3"><Database /> Données</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="team"><TeamPanel metrics={metrics} /></TabsContent>
+          <TabsContent value="team"><TeamPanel metrics={metrics} match={match} /></TabsContent>
           <TabsContent value="players">
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
               <section className="panel overflow-hidden">
                 <div className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 p-5">
-                  <div><p className="eyebrow">Rotation · 12 joueurs</p><h2 className="mt-1 text-xl font-black">Performance individuelle</h2></div>
+                  <div><p className="eyebrow">Rotation · {players.length} joueurs</p><h2 className="mt-1 text-xl font-black">Performance individuelle</h2></div>
                   <p className="max-w-md text-xs leading-5 text-stone-500">AST% = part estimée des paniers des coéquipiers assistés pendant les minutes du joueur. Cliquez une ligne pour le détail.</p>
                 </div>
                 <Table>
@@ -331,19 +382,27 @@ export function PerformanceApp() {
             <div className="grid gap-5 lg:grid-cols-2">
               <section className="panel p-6"><p className="eyebrow">Convention collective</p><h2 className="mt-2 text-2xl font-black">FGAST% et AST Ratio</h2><div className="mt-5 space-y-4 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">FGAST%</strong> mesure la part des tirs réussis qui ont été assistés. Sur ce match : <span className="font-bold text-stone-950">15 AST / 22 FGM = {formatMetric(metrics.fgast)}%</span>.</p><p>Les tirs à 3 points sont inclus dans les <strong className="text-stone-950">FGM</strong>. Les lancers francs ne sont pas des paniers de champ et n’entrent donc pas dans ce ratio.</p><p><strong className="text-stone-950">AST Ratio</strong> rapporte les passes aux possessions estimées : <span className="font-bold text-stone-950">{formatMetric(metrics.astRatio)}</span> passes pour 100 possessions.</p></div></section>
               <section className="panel p-6"><p className="eyebrow">Convention individuelle</p><h2 className="mt-2 text-2xl font-black">AST% contextualisé par les minutes</h2><div className="mt-5 bg-stone-950 p-5 font-mono text-sm leading-7 text-white">AST% = 100 × AST /<br />[(MP / 40 × Tm FGM) − FGM]</div><p className="mt-4 text-sm leading-6 text-stone-600">Ce calcul explique pourquoi deux passes peuvent représenter une part élevée si le joueur a peu joué et si ses coéquipiers ont marqué peu de paniers pendant son temps estimé.</p></section>
-              <section className="panel p-6 lg:col-span-2"><div className="flex items-center gap-2"><Target className="size-5 text-[#d71920]" /><h2 className="text-xl font-black">Référentiels disponibles</h2></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(playerReferences).map(([id, reference]) => { const player = genevaMatch.players.find((item) => item.id === id); return <div key={id} className="border border-stone-200 bg-stone-50 p-4"><div className="font-bold">{player?.name ?? id}</div><div className="mt-1 text-xs text-stone-500">{reference.season}</div><div className="mt-3 text-xs text-stone-600">{Object.keys(reference.targets).length} indicateurs ciblés</div></div>; })}</div></section>
+              <section className="panel p-6 lg:col-span-2"><div className="flex items-center gap-2"><Target className="size-5 text-[#d71920]" /><h2 className="text-xl font-black">Référentiels disponibles</h2></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(playerReferences).map(([id, reference]) => { const player = match.players.find((item) => item.id === id) ?? genevaMatch.players.find((item) => item.id === id); return <div key={id} className="border border-stone-200 bg-stone-50 p-4"><div className="font-bold">{player?.name ?? id}</div><div className="mt-1 text-xs text-stone-500">{reference.season}</div><div className="mt-3 text-xs text-stone-600">{Object.keys(reference.targets).length} indicateurs ciblés</div></div>; })}</div></section>
             </div>
           </TabsContent>
 
           <TabsContent value="data">
             <div className="grid gap-5 lg:grid-cols-[1fr_.8fr]">
               <section className="panel p-6"><p className="eyebrow">Pipeline d’un match</p><h2 className="mt-2 text-2xl font-black">De la feuille au rapport</h2><div className="mt-6 space-y-3">{[
-                [FileUp, "1. Import", "PDF, image, CSV ou saisie manuelle"],
+                [Camera, "1. Import", "Photo mobile normalisée en PDF, PDF natif, CSV ou XLSX"],
                 [Check, "2. Validation", "Contrôle des totaux, minutes et cohérence du score"],
                 [Activity, "3. Calcul", "Métriques versionnées, collectives et individuelles"],
                 [BarChart3, "4. Rapport", "Comparaison aux cibles et export imprimable"],
               ].map(([Icon, title, copy]) => { const StepIcon = Icon as typeof FileUp; return <div key={String(title)} className="flex gap-4 border border-stone-200 p-4"><div className="grid size-10 shrink-0 place-items-center bg-stone-950 text-white"><StepIcon className="size-4" /></div><div><div className="font-bold">{String(title)}</div><div className="mt-1 text-sm text-stone-500">{String(copy)}</div></div></div>; })}</div></section>
-              <section className="panel p-6"><p className="eyebrow">Infrastructure</p><h2 className="mt-2 text-2xl font-black">Supabase-ready</h2><div className="mt-6 space-y-3"><StatusRow icon={<Database />} label="Schéma SQL" value="Prêt" tone="good" /><StatusRow icon={<Cloud />} label="Connexion projet" value="Clés à renseigner" tone="watch" /><StatusRow icon={<ShieldCheck />} label="RLS" value="Activée, politiques à définir" tone="watch" /></div><div className="mt-6 border-l-2 border-[#d71920] bg-red-50 p-4 text-sm leading-6 text-red-950">Utiliser uniquement la clé publique/publishable côté navigateur. La clé <code>service_role</code> doit rester côté serveur.</div></section>
+              <section className="panel p-6"><p className="eyebrow">Infrastructure</p><h2 className="mt-2 text-2xl font-black">Supabase connecté</h2><div className="mt-6 space-y-3"><StatusRow icon={<Database />} label="Schéma SQL" value="Actif" tone="good" /><StatusRow icon={<Cloud />} label="Connexion projet" value="Configurée" tone="good" /><StatusRow icon={<ShieldCheck />} label="Lecture publique" value="Rapports publiés uniquement" tone="good" /></div><div className="mt-6"><AdminAccess onAccessChange={onAccessChange} /></div><div className="mt-6 border-l-2 border-[#d71920] bg-red-50 p-4 text-sm leading-6 text-red-950">Les visiteurs peuvent consulter les matchs publiés. Seul un administrateur autorisé peut importer ou modifier des données.</div></section>
+              <section className="panel p-6 lg:col-span-2">
+                <div className="flex items-center gap-3"><Radio className="size-5 text-[#d71920]" /><div><p className="eyebrow">Données temps réel</p><h2 className="mt-1 text-2xl font-black">Connecteurs live à autoriser</h2></div></div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <div className="border border-stone-200 p-5"><div className="flex items-start justify-between gap-3"><div><div className="font-black">Betclic Élite</div><div className="mt-1 text-sm text-stone-500">Synergy Stats DataCore Streaming</div></div><span className="watch-chip">Accès requis</span></div><p className="mt-4 text-sm leading-6 text-stone-600">Flux d’événements live à normaliser avec un identifiant de match et des identifiants serveur fournis par la LNB ou Synergy.</p></div>
+                  <div className="border border-stone-200 p-5"><div className="flex items-start justify-between gap-3"><div><div className="font-black">EuroCup</div><div className="mt-1 text-sm text-stone-500">Sportradar Global Basketball</div></div><span className="watch-chip">Couverture à confirmer</span></div><p className="mt-4 text-sm leading-6 text-stone-600">Timeline ou Push Statistics selon le contrat. La clé reste côté serveur ; l’administrateur ne saisira que l’identifiant officiel du match.</p></div>
+                </div>
+                <p className="mt-4 text-xs leading-5 text-stone-500">Un flux push accélère l’affichage, mais un snapshot REST reste la source de réconciliation en cas de coupure.</p>
+              </section>
             </div>
           </TabsContent>
         </Tabs>
@@ -356,4 +415,3 @@ function StatusRow({ icon, label, value, tone }: { icon: React.ReactNode; label:
   const styles = statusStyles[tone];
   return <div className="flex items-center justify-between gap-4 border-b border-stone-200 py-3"><div className="flex items-center gap-3 text-sm font-bold [&_svg]:size-4">{icon}{label}</div><span className={`text-xs font-bold ${styles.text}`}>{value}</span></div>;
 }
-

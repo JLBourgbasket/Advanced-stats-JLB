@@ -14,7 +14,11 @@ de validation.
 - estimations boxscore ORtg/DRtg individuelles, séparées des ratings possession
   par possession ;
 - tableau joueurs interactif, graphique des quart-temps et export PDF ;
-- schéma PostgreSQL/Supabase initial.
+- connexion Supabase, lecture publique des matchs publiés et administration
+  protégée par lien email ;
+- stockage privé des boxscores importés.
+- prise de photo sur mobile, amélioration du contraste et conversion automatique
+  en PDF A4 avant stockage privé ;
 
 ## Installation
 
@@ -36,14 +40,40 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=votre-cle-publique
 La clé `service_role` ne doit jamais être placée dans une variable
 `NEXT_PUBLIC_*`, dans le dépôt ou dans le navigateur.
 
+## Import mobile
+
+Sur téléphone, le bouton **Prendre une photo** ouvre directement l’appareil
+photo arrière. L’application conserve l’original et fabrique dans le navigateur
+un PDF A4 en niveaux de gris, redimensionné et contrasté. Cette étape prépare le
+document ; l’extraction OCR et la validation des valeurs restent une étape
+séparée afin de ne jamais publier un boxscore mal lu.
+
+## Flux de statistiques live
+
+La stratégie et les prérequis des connecteurs Betclic Élite et EuroCup sont
+décrits dans [`docs/live-feeds.md`](docs/live-feeds.md). Les clés fournisseur
+doivent rester dans un service serveur. Il ne faut jamais exposer une clé
+Synergy ou Sportradar dans une variable `NEXT_PUBLIC_*`.
+
 ## Base de données
 
-La migration initiale est disponible dans
-`supabase/migrations/202608300001_initial_schema.sql`. Elle crée les tables
-équipes, joueurs, référentiels, matchs, boxscores et rapports.
+Les migrations Supabase sont disponibles dans `supabase/migrations/` :
 
-Les tables ont la sécurité RLS activée. Les politiques d’accès seront ajoutées
-avec l’authentification et les rôles du staff.
+- `202608300001_initial_schema.sql` crée les tables principales ;
+- `202608300002_public_read_admin_write.sql` ajoute la lecture publique,
+  l’administration protégée et le stockage privé des fichiers.
+
+Après la seconde migration, ajouter l’administrateur uniquement depuis le SQL
+Editor Supabase, sans publier son adresse dans GitHub :
+
+```sql
+insert into public.admin_users (email)
+values ('email-administrateur')
+on conflict (email) do nothing;
+```
+
+Dans Supabase Auth, l’URL du site et l’URL de redirection doivent correspondre
+au domaine Netlify de production.
 
 ## Déploiement Netlify
 
@@ -61,4 +91,3 @@ avec l’authentification et les rôles du staff.
 - Les ORtg/DRtg individuels du MVP sont des estimations fondées sur le boxscore.
   Des ratings réellement « on-court » nécessitent du play-by-play ou des
   données de rotations.
-
