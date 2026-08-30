@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   Activity,
@@ -16,6 +16,7 @@ import {
   Info,
   Printer,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Target,
   Users,
@@ -249,25 +250,59 @@ function Insight({ icon, title, value, copy, tone }: { icon: React.ReactNode; ti
 export function PerformanceApp() {
   const [match, setMatch] = useState<MatchBoxscore>(genevaMatch);
   const [dataMode, setDataMode] = useState("Mode démo · boxscore validé");
+  const [syncStatus, setSyncStatus] = useState("Démarrage…");
   const [adminAccess, setAdminAccess] = useState<{ user: User | null; isAdmin: boolean }>({ user: null, isAdmin: false });
+  const refreshInProgress = useRef(false);
   const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
   const players = useMemo(() => calculatePlayerMetrics(match), [match]);
   const [selectedPlayerId, setSelectedPlayerId] = useState("soliman");
   const selectedPlayer = players.find((player) => player.id === selectedPlayerId) ?? players[0];
 
-  useEffect(() => {
-    void loadLatestPublishedMatch()
-      .then((storedMatch) => {
-        if (storedMatch) {
-          setMatch(storedMatch);
-          setSelectedPlayerId(storedMatch.players[0]?.id ?? "");
-          setDataMode("Données publiques · Supabase");
-        } else {
-          setDataMode("Mode démo · aucun match publié dans Supabase");
-        }
-      })
-      .catch(() => setDataMode("Mode démo · lecture Supabase indisponible"));
+  const refreshLatestMatch = useCallback(async (initial = false) => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+
+    try {
+      const storedMatch = await loadLatestPublishedMatch();
+      if (storedMatch) {
+        setMatch(storedMatch);
+        setSelectedPlayerId((current) => storedMatch.players.some((player) => player.id === current)
+          ? current
+          : (storedMatch.players[0]?.id ?? ""));
+        if (initial) setDataMode("Données publiques · Supabase");
+        setSyncStatus(`Actualisé à ${new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })}`);
+      } else if (initial) {
+        setDataMode("Mode démo · aucun match publié dans Supabase");
+        setSyncStatus("Aucun match publié");
+      }
+    } catch {
+      if (initial) setDataMode("Mode démo · lecture Supabase indisponible");
+      setSyncStatus("Synchronisation indisponible");
+    } finally {
+      refreshInProgress.current = false;
+    }
   }, []);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => void refreshLatestMatch(true), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshLatestMatch();
+    }, 10_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshLatestMatch();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshLatestMatch]);
 
   const onAccessChange = useCallback((state: { user: User | null; isAdmin: boolean }) => {
     setAdminAccess(state);
@@ -394,7 +429,7 @@ export function PerformanceApp() {
                 [Activity, "3. Calcul", "Métriques versionnées, collectives et individuelles"],
                 [BarChart3, "4. Rapport", "Comparaison aux cibles et export imprimable"],
               ].map(([Icon, title, copy]) => { const StepIcon = Icon as typeof FileUp; return <div key={String(title)} className="flex gap-4 border border-stone-200 p-4"><div className="grid size-10 shrink-0 place-items-center bg-stone-950 text-white"><StepIcon className="size-4" /></div><div><div className="font-bold">{String(title)}</div><div className="mt-1 text-sm text-stone-500">{String(copy)}</div></div></div>; })}</div></section>
-              <section className="panel p-6"><p className="eyebrow">Infrastructure</p><h2 className="mt-2 text-2xl font-black">Supabase connecté</h2><div className="mt-6 space-y-3"><StatusRow icon={<Database />} label="Schéma SQL" value="Actif" tone="good" /><StatusRow icon={<Cloud />} label="Connexion projet" value="Configurée" tone="good" /><StatusRow icon={<ShieldCheck />} label="Lecture publique" value="Rapports publiés uniquement" tone="good" /></div><div className="mt-6"><AdminAccess onAccessChange={onAccessChange} /></div><div className="mt-6 border-l-2 border-[#d71920] bg-red-50 p-4 text-sm leading-6 text-red-950">Les visiteurs peuvent consulter les matchs publiés. Seul un administrateur autorisé peut importer ou modifier des données.</div></section>
+              <section className="panel p-6"><p className="eyebrow">Infrastructure</p><h2 className="mt-2 text-2xl font-black">Supabase connecté</h2><div className="mt-6 space-y-3"><StatusRow icon={<Database />} label="Schéma SQL" value="Actif" tone="good" /><StatusRow icon={<Cloud />} label="Connexion projet" value="Configurée" tone="good" /><StatusRow icon={<RefreshCw />} label="Rafraîchissement" value={`10 s · ${syncStatus}`} tone={syncStatus.startsWith("Actualisé") ? "good" : "watch"} /><StatusRow icon={<ShieldCheck />} label="Lecture publique" value="Rapports publiés uniquement" tone="good" /></div><div className="mt-6"><AdminAccess onAccessChange={onAccessChange} /></div><div className="mt-6 border-l-2 border-[#d71920] bg-red-50 p-4 text-sm leading-6 text-red-950">Les visiteurs peuvent consulter les matchs publiés. Seul un administrateur autorisé peut importer ou modifier des données.</div></section>
               <section className="panel p-6 lg:col-span-2">
                 <div className="flex items-center gap-3"><Radio className="size-5 text-[#d71920]" /><div><p className="eyebrow">Données temps réel</p><h2 className="mt-1 text-2xl font-black">Connecteurs live à autoriser</h2></div></div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">

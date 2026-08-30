@@ -19,6 +19,8 @@ de validation.
 - stockage privé des boxscores importés.
 - prise de photo sur mobile, amélioration du contraste et conversion automatique
   en PDF A4 avant stockage privé ;
+- rafraîchissement automatique du dernier match publié depuis Supabase toutes
+  les 10 secondes lorsque l’application est visible.
 
 ## Installation
 
