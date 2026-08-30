@@ -11,6 +11,7 @@ import {
   CircleAlert,
   Cloud,
   Database,
+  FileSearch,
   FileUp,
   Gauge,
   Info,
@@ -34,6 +35,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { AdminAccess } from "@/components/admin-access";
+import { ImportWorkflow } from "@/components/import-workflow";
+import { ScoutingPanel } from "@/components/scouting-panel";
 import {
   Table,
   TableBody,
@@ -45,7 +48,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
-import { loadLatestPublishedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
+import { draftToMatch, extractLnbBoxscore, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
+import { loadLatestPublishedMatch, loadScoutingMatches, saveScoutingMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
 import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
 
 const statusStyles: Record<MetricStatus, { dot: string; text: string; bg: string; border: string; label: string }> = {
@@ -248,10 +252,18 @@ function Insight({ icon, title, value, copy, tone }: { icon: React.ReactNode; ti
 }
 
 export function PerformanceApp() {
+  const [activeTab, setActiveTab] = useState("team");
   const [match, setMatch] = useState<MatchBoxscore>(genevaMatch);
   const [dataMode, setDataMode] = useState("Mode démo · boxscore validé");
   const [syncStatus, setSyncStatus] = useState("Démarrage…");
   const [adminAccess, setAdminAccess] = useState<{ user: User | null; isAdmin: boolean }>({ user: null, isAdmin: false });
+  const [ocrDraft, setOcrDraft] = useState<OcrBoxscoreDraft | null>(null);
+  const [importSource, setImportSource] = useState({ name: "", path: "" });
+  const [importBusy, setImportBusy] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importMessage, setImportMessage] = useState("");
+  const [scoutingMatches, setScoutingMatches] = useState<MatchBoxscore[]>([]);
+  const [selectedScoutingId, setSelectedScoutingId] = useState("");
   const refreshInProgress = useRef(false);
   const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
   const players = useMemo(() => calculatePlayerMetrics(match), [match]);
@@ -304,6 +316,16 @@ export function PerformanceApp() {
     };
   }, [refreshLatestMatch]);
 
+  useEffect(() => {
+    const loadScouting = window.setTimeout(() => {
+      void loadScoutingMatches().then((storedMatches) => {
+        setScoutingMatches(storedMatches);
+        setSelectedScoutingId(storedMatches[0]?.id ?? "");
+      }).catch(() => setImportMessage("Historique scouting indisponible"));
+    }, 0);
+    return () => window.clearTimeout(loadScouting);
+  }, []);
+
   const onAccessChange = useCallback((state: { user: User | null; isAdmin: boolean }) => {
     setAdminAccess(state);
   }, []);
@@ -314,14 +336,59 @@ export function PerformanceApp() {
       setDataMode("Import refusé · connexion administrateur requise");
       return;
     }
-    setDataMode(`${file.name} · envoi en cours…`);
+    setActiveTab("imports");
+    setOcrDraft(null);
+    setImportBusy(true);
+    setImportProgress(0);
+    setImportMessage("Enregistrement du document et démarrage de l’OCR…");
+    setDataMode(`${file.name} · lecture en cours…`);
     try {
-      const result = await uploadBoxscoreFile(file, adminAccess.user.id);
+      const uploadPromise = uploadBoxscoreFile(file, adminAccess.user.id);
+      if (!file.type.startsWith("image/")) {
+        const result = await uploadPromise;
+        setImportSource({ name: file.name, path: result.originalPath });
+        setImportMessage("Le PDF est enregistré. Cette première version OCR traite les images PNG/JPEG ; exportez la page du boxscore en image pour l’extraire.");
+        setDataMode(`${file.name} enregistré · conversion en image requise`);
+        return;
+      }
+      const [result, extracted] = await Promise.all([
+        uploadPromise,
+        extractLnbBoxscore(file, (progress, status) => {
+          setImportProgress(progress);
+          setImportMessage(status === "recognizing text" ? "Reconnaissance des tableaux et des joueurs…" : "Préparation du moteur OCR…");
+        }),
+      ]);
+      setImportSource({ name: file.name, path: result.originalPath });
+      setOcrDraft(extracted);
+      setImportMessage("Extraction terminée · contrôlez les cellules signalées puis choisissez l’équipe à analyser.");
       setDataMode(result.convertedToPdf
-        ? `${file.name} · photo convertie en PDF · extraction à valider`
-        : `${file.name} enregistré · extraction à valider`);
+        ? `${file.name} · OCR terminé · validation requise`
+        : `${file.name} · OCR terminé · validation requise`);
     } catch (error) {
-      setDataMode(error instanceof Error ? `Échec de l’import · ${error.message}` : "Échec de l’import");
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      setImportMessage(`Échec de l’import : ${message}`);
+      setDataMode(`Échec de l’import · ${message}`);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const validateScoutingImport = async (side: "home" | "away") => {
+    if (!ocrDraft) return;
+    setImportBusy(true);
+    setImportMessage("Enregistrement du rapport de scouting dans Supabase…");
+    try {
+      const candidate = draftToMatch(ocrDraft, side);
+      const stored = await saveScoutingMatch(candidate, importSource.name, importSource.path || null);
+      setScoutingMatches((current) => [stored, ...current.filter((item) => item.id !== stored.id)]);
+      setSelectedScoutingId(stored.id);
+      setDataMode(`${stored.team.name} · rapport de scouting publié`);
+      setImportMessage("Rapport validé et publié.");
+      setActiveTab("scouting");
+    } catch (error) {
+      setImportMessage(error instanceof Error ? `Enregistrement impossible : ${error.message}` : "Enregistrement impossible");
+    } finally {
+      setImportBusy(false);
     }
   };
 
@@ -376,15 +443,19 @@ export function PerformanceApp() {
           </div>
         </section>
 
-        <Tabs defaultValue="team" className="gap-5">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
           <TabsList variant="line" className="print-hidden w-full justify-start overflow-x-auto border-b border-stone-300 pb-0">
             <TabsTrigger value="team" className="flex-none px-3 pb-3"><Gauge /> Équipe</TabsTrigger>
             <TabsTrigger value="players" className="flex-none px-3 pb-3"><Users /> Joueurs</TabsTrigger>
+            <TabsTrigger value="scouting" className="flex-none px-3 pb-3"><Radio /> Adversaires</TabsTrigger>
+            <TabsTrigger value="imports" className="flex-none px-3 pb-3"><FileSearch /> Imports</TabsTrigger>
             <TabsTrigger value="references" className="flex-none px-3 pb-3"><Target /> Référentiels</TabsTrigger>
             <TabsTrigger value="data" className="flex-none px-3 pb-3"><Database /> Données</TabsTrigger>
           </TabsList>
 
           <TabsContent value="team"><TeamPanel metrics={metrics} match={match} /></TabsContent>
+          <TabsContent value="scouting"><ScoutingPanel matches={scoutingMatches} selectedId={selectedScoutingId} onSelect={setSelectedScoutingId} /></TabsContent>
+          <TabsContent value="imports"><ImportWorkflow draft={ocrDraft} sourceName={importSource.name} busy={importBusy} progress={importProgress} message={importMessage} onDraftChange={setOcrDraft} onValidate={validateScoutingImport} /></TabsContent>
           <TabsContent value="players">
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
               <section className="panel overflow-hidden">

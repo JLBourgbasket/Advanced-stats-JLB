@@ -21,6 +21,11 @@ de validation.
   en PDF A4 avant stockage privé ;
 - rafraîchissement automatique du dernier match publié depuis Supabase toutes
   les 10 secondes lorsque l’application est visible.
+- OCR local des boxscores LNB en image, écran de correction cellule par cellule
+  et contrôles automatiques du score, des points joueurs et des minutes ;
+- espace « Scouting adversaires » avec rapports collectifs et individuels,
+  codes couleur menace/opportunité, historique Supabase et moyennes sur 1, 3,
+  5 ou 10 matchs disponibles.
 
 ## Installation
 
@@ -64,6 +69,11 @@ Les migrations Supabase sont disponibles dans `supabase/migrations/` :
 - `202608300001_initial_schema.sql` crée les tables principales ;
 - `202608300002_public_read_admin_write.sql` ajoute la lecture publique,
   l’administration protégée et le stockage privé des fichiers.
+- `202608300003_scouting_matches.sql` distingue les matchs JL Bourg des rapports
+  consacrés aux adversaires.
+
+La troisième migration doit être exécutée avant la mise en production du module
+de scouting.
 
 Après la seconde migration, ajouter l’administrateur uniquement depuis le SQL
 Editor Supabase, sans publier son adresse dans GitHub :
@@ -93,3 +103,12 @@ au domaine Netlify de production.
 - Les ORtg/DRtg individuels du MVP sont des estimations fondées sur le boxscore.
   Des ratings réellement « on-court » nécessitent du play-by-play ou des
   données de rotations.
+
+## OCR des boxscores
+
+La première version reconnaît les images PNG/JPEG du format de tableau LNB
+utilisé pour Chalon/Saône–Dijon. Tesseract s’exécute dans le navigateur : le
+document n’est pas envoyé à un service OCR tiers. Les totaux, les deux équipes,
+les quart-temps et les lignes joueurs sont proposés dans un écran de validation.
+Les PDF natifs restent stockés, mais devront être convertis en image avant OCR
+jusqu’à l’ajout du rendu automatique des pages PDF.
