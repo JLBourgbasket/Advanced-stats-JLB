@@ -29,6 +29,10 @@ de validation.
 - rapport JL Bourg enrichi sans remplacement des jauges existantes : points
   d’appui, axes de progression, Four Factors, profil de tirs, historique des
   ratings, carte usage/efficacité et tableau individuel complet par match.
+- séparation des espaces Live, Match JL et Historique, avec sélection d’un
+  ancien match et échantillons de 1, 3, 5, 10 matchs ou saison complète ;
+- classification assistée des imports : reconnaissance des alias JL Bourg,
+  confirmation Match JL/scouting et choix explicite de l’équipe analysée ;
 - rapport adverse complet : synthèse automatique, clés du plan de match JL,
   Four Factors, profil de tirs, score par quart-temps, tendances ORtg/DRtg,
   cartographie usage–efficacité et tableau individuel étendu.
@@ -77,9 +81,11 @@ Les migrations Supabase sont disponibles dans `supabase/migrations/` :
   l’administration protégée et le stockage privé des fichiers.
 - `202608300003_scouting_matches.sql` distingue les matchs JL Bourg des rapports
   consacrés aux adversaires.
+- `202608310004_live_match_sources.sql` ajoute l’origine import/live, le statut
+  du direct, le fournisseur et l’identifiant officiel du match.
 
-La troisième migration doit être exécutée avant la mise en production du module
-de scouting.
+Les troisième et quatrième migrations doivent être exécutées avant la mise en
+production des modules de scouting et de live.
 
 Après la seconde migration, ajouter l’administrateur uniquement depuis le SQL
 Editor Supabase, sans publier son adresse dans GitHub :
