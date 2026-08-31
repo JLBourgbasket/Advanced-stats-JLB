@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AdminAccess } from "@/components/admin-access";
 import { ImportWorkflow } from "@/components/import-workflow";
+import { JlPerformanceDeepDive } from "@/components/jl-performance-deep-dive";
 import { ScoutingPanel } from "@/components/scouting-panel";
 import {
   Table,
@@ -49,7 +50,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
 import { draftToMatch, extractLnbBoxscore, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
-import { loadLatestPublishedMatch, loadScoutingMatches, saveScoutingMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
+import { loadLatestPublishedMatch, loadPublishedMatches, loadScoutingMatches, saveScoutingMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
 import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
 
 const statusStyles: Record<MetricStatus, { dot: string; text: string; bg: string; border: string; label: string }> = {
@@ -186,10 +187,17 @@ function Box({ label, value }: { label: string; value: string }) {
   return <div><div className="text-[10px] font-bold tracking-[0.1em] text-stone-400">{label}</div><div className="mt-1 font-black tabular-nums">{value}</div></div>;
 }
 
-function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxscore }) {
+function TeamPanel({ metrics, match, history }: { metrics: TeamMetrics; match: MatchBoxscore; history: MatchBoxscore[] }) {
   const statuses = teamTargets.map((target) => metricStatus(metricValue(metrics, target.key), target));
   const good = statuses.filter((status) => status === "good").length;
   const red = statuses.filter((status) => status === "bad").length;
+  const reading = metrics.drtg <= 110 && metrics.ortg >= 115
+    ? "Performance complète des deux côtés"
+    : metrics.drtg <= 110
+      ? "Défense solide, attaque à optimiser"
+      : metrics.ortg >= 115
+        ? "Attaque efficace, défense à stabiliser"
+        : "Production à consolider des deux côtés";
 
   return (
     <div className="space-y-5">
@@ -198,7 +206,7 @@ function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxsc
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="eyebrow">Lecture du match</p>
-              <h2 className="mt-2 text-2xl font-black tracking-tight">Défense dominante, attaque sous tension</h2>
+              <h2 className="mt-2 text-2xl font-black tracking-tight">{reading}</h2>
             </div>
             <div className="flex gap-2">
               <span className="good-chip"><Check className="size-3.5" /> {good} cibles</span>
@@ -206,9 +214,9 @@ function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxsc
             </div>
           </div>
           <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            <Insight icon={<ShieldCheck className="size-5" />} title="Défense gagnante" value={`${formatMetric(metrics.drtg)} DRtg`} copy="Ballons perdus adverses provoqués et adresse contenue." tone="good" />
-            <Insight icon={<CircleAlert className="size-5" />} title="Création coûteuse" value={`${formatMetric(metrics.tov)}% TOV`} copy="19 pertes de balle malgré un FGAST% au-dessus de la cible." tone="bad" />
-            <Insight icon={<Target className="size-5" />} title="Différentiel positif" value={`+${formatMetric(metrics.net)} Net`} copy="La défense compense l’inefficacité offensive." tone="neutral" />
+            <Insight icon={<ShieldCheck className="size-5" />} title="Impact défensif" value={`${formatMetric(metrics.drtg)} DRtg`} copy={`eFG% adverse ${formatMetric(metrics.oppEfg)}% · TOV% adverse ${formatMetric(metrics.oppTov)}%.`} tone={metrics.drtg <= 110 ? "good" : "bad"} />
+            <Insight icon={<CircleAlert className="size-5" />} title="Sécurité de balle" value={`${formatMetric(metrics.tov)}% TOV`} copy={`${match.team.tov} pertes de balle · cible collective ≤ 14,5%.`} tone={metrics.tov <= 14.5 ? "good" : "bad"} />
+            <Insight icon={<Target className="size-5" />} title="Différentiel" value={`${metrics.net > 0 ? "+" : ""}${formatMetric(metrics.net)} Net`} copy={`${formatMetric(metrics.ortg)} ORtg contre ${formatMetric(metrics.drtg)} DRtg.`} tone={metrics.net >= 7 ? "good" : metrics.net < 0 ? "bad" : "neutral"} />
           </div>
         </article>
 
@@ -225,8 +233,8 @@ function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxsc
                 <YAxis axisLine={false} tickLine={false} fontSize={11} width={24} />
                 <Tooltip contentStyle={{ border: "1px solid #d6d0c5", borderRadius: 0, fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="team" name="JL Bourg" fill="#d71920" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="opponent" name="Genève" fill="#222222" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="team" name={match.team.name} fill="#d71920" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="opponent" name={match.opponent.name} fill="#222222" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -242,6 +250,8 @@ function TeamPanel({ metrics, match }: { metrics: TeamMetrics; match: MatchBoxsc
           {teamTargets.map((target) => <MetricGauge key={target.key} target={target} value={metricValue(metrics, target.key)} />)}
         </div>
       </section>
+
+      <JlPerformanceDeepDive match={match} metrics={metrics} history={history} />
     </div>
   );
 }
@@ -263,6 +273,7 @@ export function PerformanceApp() {
   const [importProgress, setImportProgress] = useState(0);
   const [importMessage, setImportMessage] = useState("");
   const [scoutingMatches, setScoutingMatches] = useState<MatchBoxscore[]>([]);
+  const [teamHistory, setTeamHistory] = useState<MatchBoxscore[]>([genevaMatch]);
   const [selectedScoutingId, setSelectedScoutingId] = useState("");
   const refreshInProgress = useRef(false);
   const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
@@ -278,6 +289,7 @@ export function PerformanceApp() {
       const storedMatch = await loadLatestPublishedMatch();
       if (storedMatch) {
         setMatch(storedMatch);
+        setTeamHistory((current) => [storedMatch, ...current.filter((item) => item.id !== storedMatch.id)].slice(0, 10));
         setSelectedPlayerId((current) => storedMatch.players.some((player) => player.id === current)
           ? current
           : (storedMatch.players[0]?.id ?? ""));
@@ -297,6 +309,15 @@ export function PerformanceApp() {
     } finally {
       refreshInProgress.current = false;
     }
+  }, []);
+
+  useEffect(() => {
+    const loadHistory = window.setTimeout(() => {
+      void loadPublishedMatches(10).then((storedMatches) => {
+        if (storedMatches.length > 0) setTeamHistory(storedMatches);
+      }).catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(loadHistory);
   }, []);
 
   useEffect(() => {
@@ -453,7 +474,7 @@ export function PerformanceApp() {
             <TabsTrigger value="data" className="flex-none px-3 pb-3"><Database /> Données</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="team"><TeamPanel metrics={metrics} match={match} /></TabsContent>
+          <TabsContent value="team"><TeamPanel metrics={metrics} match={match} history={teamHistory} /></TabsContent>
           <TabsContent value="scouting"><ScoutingPanel matches={scoutingMatches} selectedId={selectedScoutingId} onSelect={setSelectedScoutingId} /></TabsContent>
           <TabsContent value="imports"><ImportWorkflow draft={ocrDraft} sourceName={importSource.name} busy={importBusy} progress={importProgress} message={importMessage} onDraftChange={setOcrDraft} onValidate={validateScoutingImport} /></TabsContent>
           <TabsContent value="players">
