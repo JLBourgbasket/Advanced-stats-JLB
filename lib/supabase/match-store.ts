@@ -12,7 +12,15 @@ type MatchRow = {
   played_at: string;
   competition: string | null;
   venue: string | null;
+  source_type?: "import" | "live" | null;
+  live_status?: "scheduled" | "live" | "final" | null;
+  provider?: "manual" | "synergy" | "sportradar" | null;
+  external_match_id?: string | null;
+  last_synced_at?: string | null;
 };
+
+const baseMatchColumns = "id, opponent_name, played_at, competition, venue";
+const extendedMatchColumns = `${baseMatchColumns}, source_type, live_status, provider, external_match_id, last_synced_at`;
 
 function slug(value: string) {
   return value
@@ -59,6 +67,11 @@ async function loadStoredMatch(match: MatchRow): Promise<MatchBoxscore | null> {
     opponent,
     players,
     quarters: team.quarters ?? [],
+    sourceType: match.source_type ?? "import",
+    liveStatus: match.live_status ?? "final",
+    provider: match.provider ?? "manual",
+    externalMatchId: match.external_match_id ?? null,
+    lastSyncedAt: match.last_synced_at ?? null,
   };
 }
 
@@ -66,25 +79,39 @@ export async function loadLatestPublishedMatch(): Promise<MatchBoxscore | null> 
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return null;
 
-  let { data: match, error: matchError } = await supabase
+  const primary = await supabase
     .from("matches")
-    .select("id, opponent_name, played_at, competition, venue")
+    .select(extendedMatchColumns)
     .eq("analysis_type", "jl")
     .eq("status", "published")
     .order("played_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  let match = primary.data as MatchRow | null;
+  let matchError = primary.error;
 
-  if (matchError?.code === "42703") {
+  if (matchError?.code === "42703" || matchError?.code === "PGRST204") {
     const fallback = await supabase
       .from("matches")
-      .select("id, opponent_name, played_at, competition, venue")
+      .select(baseMatchColumns)
+      .eq("analysis_type", "jl")
       .eq("status", "published")
       .order("played_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    match = fallback.data;
+    match = fallback.data as MatchRow | null;
     matchError = fallback.error;
+  }
+  if (matchError?.code === "42703") {
+    const legacy = await supabase
+      .from("matches")
+      .select(baseMatchColumns)
+      .eq("status", "published")
+      .order("played_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    match = legacy.data as MatchRow | null;
+    matchError = legacy.error;
   }
   if (matchError) throw matchError;
   if (!match) return null;
@@ -95,24 +122,54 @@ export async function loadPublishedMatches(limit = 10): Promise<MatchBoxscore[]>
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return [];
 
-  let { data, error } = await supabase
+  const primary = await supabase
     .from("matches")
-    .select("id, opponent_name, played_at, competition, venue")
+    .select(extendedMatchColumns)
     .eq("analysis_type", "jl")
     .eq("status", "published")
     .order("played_at", { ascending: false })
     .limit(limit);
+  let data = primary.data as MatchRow[] | null;
+  let error = primary.error;
 
-  if (error?.code === "42703") {
+  if (error?.code === "42703" || error?.code === "PGRST204") {
     const fallback = await supabase
       .from("matches")
-      .select("id, opponent_name, played_at, competition, venue")
+      .select(baseMatchColumns)
+      .eq("analysis_type", "jl")
       .eq("status", "published")
       .order("played_at", { ascending: false })
       .limit(limit);
-    data = fallback.data;
+    data = fallback.data as MatchRow[] | null;
     error = fallback.error;
   }
+  if (error?.code === "42703") {
+    const legacy = await supabase
+      .from("matches")
+      .select(baseMatchColumns)
+      .eq("status", "published")
+      .order("played_at", { ascending: false })
+      .limit(limit);
+    data = legacy.data as MatchRow[] | null;
+    error = legacy.error;
+  }
+  if (error) throw error;
+  const matches = await Promise.all((data ?? []).map((row) => loadStoredMatch(row)));
+  return matches.filter((storedMatch): storedMatch is MatchBoxscore => storedMatch !== null);
+}
+
+export async function loadLiveMatches(): Promise<MatchBoxscore[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("matches")
+    .select(extendedMatchColumns)
+    .eq("analysis_type", "jl")
+    .eq("source_type", "live")
+    .in("live_status", ["scheduled", "live"])
+    .eq("status", "published")
+    .order("played_at", { ascending: true });
+  if (error?.code === "42703" || error?.code === "PGRST204") return [];
   if (error) throw error;
   const matches = await Promise.all((data ?? []).map((row) => loadStoredMatch(row)));
   return matches.filter((storedMatch): storedMatch is MatchBoxscore => storedMatch !== null);
@@ -123,7 +180,7 @@ export async function loadScoutingMatches(limit = 20): Promise<MatchBoxscore[]> 
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("matches")
-    .select("id, opponent_name, played_at, competition, venue")
+    .select(baseMatchColumns)
     .eq("analysis_type", "scouting")
     .eq("status", "published")
     .order("played_at", { ascending: false })
@@ -134,7 +191,12 @@ export async function loadScoutingMatches(limit = 20): Promise<MatchBoxscore[]> 
   return matches.filter((match): match is MatchBoxscore => match !== null);
 }
 
-export async function saveScoutingMatch(match: MatchBoxscore, sourceFilename: string, sourcePath: string | null) {
+export async function saveImportedMatch(
+  match: MatchBoxscore,
+  analysisType: "jl" | "scouting",
+  sourceFilename: string,
+  sourcePath: string | null,
+) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) throw new Error("Supabase n’est pas configuré.");
   const teamSlug = slug(match.team.name);
@@ -154,14 +216,17 @@ export async function saveScoutingMatch(match: MatchBoxscore, sourceFilename: st
       competition: match.competition,
       venue: match.venue,
       status: "published",
-      analysis_type: "scouting",
+      analysis_type: analysisType,
+      source_type: "import",
+      live_status: "final",
+      provider: "manual",
       source_filename: sourceFilename,
       source_path: sourcePath,
     })
     .select("id")
     .single();
   if (matchError) {
-    if (matchError.code === "PGRST204") throw new Error("La migration scouting doit être exécutée dans Supabase.");
+    if (matchError.code === "PGRST204") throw new Error("La migration live/import 004 doit être exécutée dans Supabase.");
     throw matchError;
   }
 
@@ -186,10 +251,21 @@ export async function saveScoutingMatch(match: MatchBoxscore, sourceFilename: st
   const { error: reportError } = await supabase.from("reports").insert({
     match_id: storedMatch.id,
     status: "ready",
-    summary: { analysisType: "scouting", source: "ocr" },
+    summary: { analysisType, source: "ocr" },
   });
   if (reportError) throw reportError;
-  return { ...match, id: storedMatch.id };
+  return {
+    ...match,
+    id: storedMatch.id,
+    analysisType,
+    sourceType: "import" as const,
+    liveStatus: "final" as const,
+    provider: "manual" as const,
+  };
+}
+
+export async function saveScoutingMatch(match: MatchBoxscore, sourceFilename: string, sourcePath: string | null) {
+  return saveImportedMatch(match, "scouting", sourceFilename, sourcePath);
 }
 
 export async function uploadBoxscoreFile(file: File, userId: string) {
