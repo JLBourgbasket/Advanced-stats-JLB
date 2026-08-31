@@ -1,10 +1,11 @@
 "use client";
 
-import { AlertTriangle, Check, LoaderCircle, ScanText } from "lucide-react";
+import { AlertTriangle, Check, LoaderCircle, Radio, ScanText, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
 import type { RawPlayerBoxscore, RawTeamBoxscore } from "@/lib/stats/types";
+import type { BoxscoreSide } from "@/lib/teams/jl-bourg";
 
 type Props = {
   draft: OcrBoxscoreDraft | null;
@@ -12,8 +13,13 @@ type Props = {
   busy: boolean;
   progress: number;
   message: string;
+  analysisType: "jl" | "scouting";
+  analyzedSide: BoxscoreSide;
+  detectedJlSide: BoxscoreSide | null;
   onDraftChange: (draft: OcrBoxscoreDraft) => void;
-  onValidate: (side: "home" | "away") => Promise<void>;
+  onAnalysisTypeChange: (analysisType: "jl" | "scouting") => void;
+  onAnalyzedSideChange: (side: BoxscoreSide) => void;
+  onValidate: (analysisType: "jl" | "scouting", side: BoxscoreSide) => Promise<void>;
 };
 
 const teamFields: Array<[keyof RawTeamBoxscore, string]> = [
@@ -46,7 +52,7 @@ function consistencyMessages(draft: OcrBoxscoreDraft, side: "home" | "away") {
   return messages;
 }
 
-export function ImportWorkflow({ draft, sourceName, busy, progress, message, onDraftChange, onValidate }: Props) {
+export function ImportWorkflow({ draft, sourceName, busy, progress, message, analysisType, analyzedSide, detectedJlSide, onDraftChange, onAnalysisTypeChange, onAnalyzedSideChange, onValidate }: Props) {
   if (!draft) {
     return (
       <section className="panel p-6">
@@ -100,9 +106,18 @@ export function ImportWorkflow({ draft, sourceName, busy, progress, message, onD
       </section>
 
       <section className="panel p-5 sm:p-6">
-        <p className="eyebrow">Équipe à analyser</p><h3 className="mt-2 text-xl font-black">Créer le rapport de scouting</h3>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">{(["home", "away"] as const).map((side) => <Button key={side} disabled={busy} onClick={() => void onValidate(side)} className="h-auto min-h-14 rounded-none bg-stone-950 px-5 py-3 text-left hover:bg-[#d71920]"><span><span className="block text-xs font-normal text-stone-300">Valider, calculer et publier</span><span className="mt-1 block text-base font-black">{draft[side].name}</span></span></Button>)}</div>
-        <p className="mt-3 text-xs text-stone-500">Le même boxscore peut être réimporté pour créer ultérieurement un rapport centré sur l’autre équipe.</p>
+        <p className="eyebrow">Destination du rapport</p><h3 className="mt-2 text-xl font-black">Classer puis publier le match</h3>
+        <div className={`mt-4 border-l-4 p-4 text-sm ${detectedJlSide ? "border-emerald-500 bg-emerald-50 text-emerald-950" : "border-amber-500 bg-amber-50 text-amber-950"}`}>
+          <div className="flex items-center gap-2 font-bold">{detectedJlSide ? <Check className="size-4" /> : <AlertTriangle className="size-4" />}{detectedJlSide ? `JL Bourg reconnue comme équipe ${detectedJlSide === "home" ? "domicile" : "visiteuse"}.` : "JL Bourg n’a pas été reconnue automatiquement."}</div>
+          <p className="mt-1 text-xs opacity-75">La proposition reste modifiable avant l’enregistrement.</p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => { onAnalysisTypeChange("jl"); if (detectedJlSide) onAnalyzedSideChange(detectedJlSide); }} className={`border p-4 text-left ${analysisType === "jl" ? "border-[#d71920] bg-red-50" : "border-stone-300 bg-white"}`}><div className="flex items-center gap-2 font-black"><ShieldCheck className="size-4" /> Match JL Bourg</div><p className="mt-2 text-xs leading-5 text-stone-500">Le match restera consultable individuellement et alimentera l’historique JL.</p></button>
+          <button type="button" onClick={() => onAnalysisTypeChange("scouting")} className={`border p-4 text-left ${analysisType === "scouting" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-300 bg-white"}`}><div className="flex items-center gap-2 font-black"><Radio className="size-4" /> Scouting adversaire</div><p className={`mt-2 text-xs leading-5 ${analysisType === "scouting" ? "text-stone-300" : "text-stone-500"}`}>Le rapport sera classé dans l’espace Adversaires.</p></button>
+        </div>
+        <div className="mt-5"><div className="text-xs font-bold uppercase tracking-[0.1em] text-stone-500">Équipe analysée</div><div className="mt-2 grid gap-3 sm:grid-cols-2">{(["home", "away"] as const).map((side) => <button type="button" key={side} onClick={() => onAnalyzedSideChange(side)} className={`border p-3 text-left ${analyzedSide === side ? "border-[#d71920] bg-red-50" : "border-stone-300 bg-white"}`}><span className="text-[10px] uppercase tracking-[0.1em] text-stone-400">{side === "home" ? "Domicile" : "Visiteur"}</span><span className="mt-1 block font-black">{draft[side].name}</span></button>)}</div></div>
+        <Button disabled={busy} onClick={() => void onValidate(analysisType, analyzedSide)} className="mt-5 h-auto min-h-14 w-full rounded-none bg-[#d71920] px-5 py-3 text-left hover:bg-[#b71017]"><span><span className="block text-xs font-normal text-red-100">Valider, calculer et publier</span><span className="mt-1 block text-base font-black">{analysisType === "jl" ? "Match JL Bourg" : "Rapport adverse"} · {draft[analyzedSide].name}</span></span></Button>
+        <p className="mt-3 text-xs text-stone-500">Cette confirmation empêche une erreur OCR de classer silencieusement le match dans la mauvaise section.</p>
       </section>
     </div>
   );
