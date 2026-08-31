@@ -91,6 +91,33 @@ export async function loadLatestPublishedMatch(): Promise<MatchBoxscore | null> 
   return loadStoredMatch(match);
 }
 
+export async function loadPublishedMatches(limit = 10): Promise<MatchBoxscore[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return [];
+
+  let { data, error } = await supabase
+    .from("matches")
+    .select("id, opponent_name, played_at, competition, venue")
+    .eq("analysis_type", "jl")
+    .eq("status", "published")
+    .order("played_at", { ascending: false })
+    .limit(limit);
+
+  if (error?.code === "42703") {
+    const fallback = await supabase
+      .from("matches")
+      .select("id, opponent_name, played_at, competition, venue")
+      .eq("status", "published")
+      .order("played_at", { ascending: false })
+      .limit(limit);
+    data = fallback.data;
+    error = fallback.error;
+  }
+  if (error) throw error;
+  const matches = await Promise.all((data ?? []).map((row) => loadStoredMatch(row)));
+  return matches.filter((storedMatch): storedMatch is MatchBoxscore => storedMatch !== null);
+}
+
 export async function loadScoutingMatches(limit = 20): Promise<MatchBoxscore[]> {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return [];
