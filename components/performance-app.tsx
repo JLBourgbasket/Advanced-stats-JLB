@@ -6,6 +6,7 @@ import {
   Activity,
   BarChart3,
   Camera,
+  CalendarRange,
   Check,
   ChevronRight,
   CircleAlert,
@@ -36,7 +37,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { AdminAccess } from "@/components/admin-access";
 import { ImportWorkflow } from "@/components/import-workflow";
+import { JlHistoryPanel } from "@/components/jl-history-panel";
 import { JlPerformanceDeepDive } from "@/components/jl-performance-deep-dive";
+import { LiveMatchPanel } from "@/components/live-match-panel";
 import { ScoutingPanel } from "@/components/scouting-panel";
 import {
   Table,
@@ -50,8 +53,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
 import { draftToMatch, extractLnbBoxscore, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
-import { loadLatestPublishedMatch, loadPublishedMatches, loadScoutingMatches, saveScoutingMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
+import { loadLatestPublishedMatch, loadLiveMatches, loadPublishedMatches, loadScoutingMatches, saveImportedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
 import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
+import { detectJlBourgSide, type BoxscoreSide } from "@/lib/teams/jl-bourg";
 
 const statusStyles: Record<MetricStatus, { dot: string; text: string; bg: string; border: string; label: string }> = {
   good: { dot: "bg-emerald-600", text: "text-emerald-800", bg: "bg-emerald-50", border: "border-emerald-200", label: "Cible atteinte" },
@@ -261,8 +265,12 @@ function Insight({ icon, title, value, copy, tone }: { icon: React.ReactNode; ti
   return <div className={`border p-4 ${toneClass}`}><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em]">{icon}{title}</div><div className="mt-3 text-xl font-black tabular-nums">{value}</div><p className="mt-2 text-xs leading-5 opacity-75">{copy}</p></div>;
 }
 
+function JlMatchPicker({ matches, selectedId, onSelect }: { matches: MatchBoxscore[]; selectedId: string; onSelect: (match: MatchBoxscore) => void }) {
+  return <section className="panel print-hidden p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-2"><p className="eyebrow">Rapport individuel</p><h2 className="mt-1 text-lg font-black">Choisir un match JL</h2></div><div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">{matches.map((item) => <button key={item.id} onClick={() => onSelect(item)} className={`min-w-48 border p-3 text-left ${item.id === selectedId ? "border-[#d71920] bg-red-50" : "border-stone-200 bg-white hover:bg-stone-50"}`}><div className="flex items-center justify-between gap-3"><span className="font-bold">vs {item.opponent.name}</span><span className={`font-condensed font-black ${item.team.points > item.opponent.points ? "text-emerald-700" : "text-[#d71920]"}`}>{item.team.points}–{item.opponent.points}</span></div><div className="mt-1 text-[10px] text-stone-500">{item.date.split("-").reverse().join("/")} · {item.sourceType === "live" ? "flux live" : "import"}</div></button>)}</div></div></section>;
+}
+
 export function PerformanceApp() {
-  const [activeTab, setActiveTab] = useState("team");
+  const [activeTab, setActiveTab] = useState("match");
   const [match, setMatch] = useState<MatchBoxscore>(genevaMatch);
   const [dataMode, setDataMode] = useState("Mode démo · boxscore validé");
   const [syncStatus, setSyncStatus] = useState("Démarrage…");
@@ -272,9 +280,15 @@ export function PerformanceApp() {
   const [importBusy, setImportBusy] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importMessage, setImportMessage] = useState("");
+  const [importAnalysisType, setImportAnalysisType] = useState<"jl" | "scouting">("scouting");
+  const [importAnalyzedSide, setImportAnalyzedSide] = useState<BoxscoreSide>("home");
+  const [detectedJlSide, setDetectedJlSide] = useState<BoxscoreSide | null>(null);
   const [scoutingMatches, setScoutingMatches] = useState<MatchBoxscore[]>([]);
   const [teamHistory, setTeamHistory] = useState<MatchBoxscore[]>([genevaMatch]);
+  const [liveMatches, setLiveMatches] = useState<MatchBoxscore[]>([]);
+  const [selectedJlMatchId, setSelectedJlMatchId] = useState(genevaMatch.id);
   const [selectedScoutingId, setSelectedScoutingId] = useState("");
+  const selectedJlMatchIdRef = useRef(genevaMatch.id);
   const refreshInProgress = useRef(false);
   const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
   const players = useMemo(() => calculatePlayerMetrics(match), [match]);
@@ -288,11 +302,15 @@ export function PerformanceApp() {
     try {
       const storedMatch = await loadLatestPublishedMatch();
       if (storedMatch) {
-        setMatch(storedMatch);
         setTeamHistory((current) => [storedMatch, ...current.filter((item) => item.id !== storedMatch.id)].slice(0, 10));
-        setSelectedPlayerId((current) => storedMatch.players.some((player) => player.id === current)
-          ? current
-          : (storedMatch.players[0]?.id ?? ""));
+        if (initial || selectedJlMatchIdRef.current === storedMatch.id) {
+          setMatch(storedMatch);
+          setSelectedJlMatchId(storedMatch.id);
+          selectedJlMatchIdRef.current = storedMatch.id;
+          setSelectedPlayerId((current) => storedMatch.players.some((player) => player.id === current)
+            ? current
+            : (storedMatch.players[0]?.id ?? ""));
+        }
         if (initial) setDataMode("Données publiques · Supabase");
         setSyncStatus(`Actualisé à ${new Date().toLocaleTimeString("fr-FR", {
           hour: "2-digit",
@@ -308,6 +326,14 @@ export function PerformanceApp() {
       setSyncStatus("Synchronisation indisponible");
     } finally {
       refreshInProgress.current = false;
+    }
+  }, []);
+
+  const refreshLiveMatches = useCallback(async () => {
+    try {
+      setLiveMatches(await loadLiveMatches());
+    } catch {
+      setSyncStatus("Flux live indisponible");
     }
   }, []);
 
@@ -336,6 +362,17 @@ export function PerformanceApp() {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [refreshLatestMatch]);
+
+  useEffect(() => {
+    const initialLiveRefresh = window.setTimeout(() => void refreshLiveMatches(), 0);
+    const liveInterval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshLiveMatches();
+    }, 10_000);
+    return () => {
+      window.clearTimeout(initialLiveRefresh);
+      window.clearInterval(liveInterval);
+    };
+  }, [refreshLiveMatches]);
 
   useEffect(() => {
     const loadScouting = window.setTimeout(() => {
@@ -381,6 +418,10 @@ export function PerformanceApp() {
       ]);
       setImportSource({ name: file.name, path: result.originalPath });
       setOcrDraft(extracted);
+      const jlSide = detectJlBourgSide(extracted);
+      setDetectedJlSide(jlSide);
+      setImportAnalysisType(jlSide ? "jl" : "scouting");
+      setImportAnalyzedSide(jlSide ?? "home");
       setImportMessage("Extraction terminée · contrôlez les cellules signalées puis choisissez l’équipe à analyser.");
       setDataMode(result.convertedToPdf
         ? `${file.name} · OCR terminé · validation requise`
@@ -394,18 +435,33 @@ export function PerformanceApp() {
     }
   };
 
-  const validateScoutingImport = async (side: "home" | "away") => {
+  const selectJlMatch = useCallback((selected: MatchBoxscore, destination: "match" | "players" = "match") => {
+    setMatch(selected);
+    setSelectedJlMatchId(selected.id);
+    selectedJlMatchIdRef.current = selected.id;
+    setSelectedPlayerId(selected.players[0]?.id ?? "");
+    setDataMode(`${selected.sourceType === "live" ? "Flux live" : "Import"} · match JL Bourg`);
+    setActiveTab(destination);
+  }, []);
+
+  const validateImport = async (analysisType: "jl" | "scouting", side: BoxscoreSide) => {
     if (!ocrDraft) return;
     setImportBusy(true);
-    setImportMessage("Enregistrement du rapport de scouting dans Supabase…");
+    setImportMessage(`Enregistrement du ${analysisType === "jl" ? "match JL Bourg" : "rapport de scouting"} dans Supabase…`);
     try {
       const candidate = draftToMatch(ocrDraft, side);
-      const stored = await saveScoutingMatch(candidate, importSource.name, importSource.path || null);
-      setScoutingMatches((current) => [stored, ...current.filter((item) => item.id !== stored.id)]);
-      setSelectedScoutingId(stored.id);
-      setDataMode(`${stored.team.name} · rapport de scouting publié`);
+      const stored = await saveImportedMatch(candidate, analysisType, importSource.name, importSource.path || null);
+      if (analysisType === "jl") {
+        setTeamHistory((current) => [stored, ...current.filter((item) => item.id !== stored.id)].slice(0, 10));
+        selectJlMatch(stored);
+        setDataMode(`${stored.team.name} · match JL Bourg publié`);
+      } else {
+        setScoutingMatches((current) => [stored, ...current.filter((item) => item.id !== stored.id)]);
+        setSelectedScoutingId(stored.id);
+        setDataMode(`${stored.team.name} · rapport de scouting publié`);
+        setActiveTab("scouting");
+      }
       setImportMessage("Rapport validé et publié.");
-      setActiveTab("scouting");
     } catch (error) {
       setImportMessage(error instanceof Error ? `Enregistrement impossible : ${error.message}` : "Enregistrement impossible");
     } finally {
@@ -466,7 +522,9 @@ export function PerformanceApp() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
           <TabsList variant="line" className="print-hidden w-full justify-start overflow-x-auto border-b border-stone-300 pb-0">
-            <TabsTrigger value="team" className="flex-none px-3 pb-3"><Gauge /> Équipe</TabsTrigger>
+            <TabsTrigger value="live" className="flex-none px-3 pb-3"><Activity /> Live</TabsTrigger>
+            <TabsTrigger value="match" className="flex-none px-3 pb-3"><Gauge /> Match JL</TabsTrigger>
+            <TabsTrigger value="history" className="flex-none px-3 pb-3"><CalendarRange /> Historique</TabsTrigger>
             <TabsTrigger value="players" className="flex-none px-3 pb-3"><Users /> Joueurs</TabsTrigger>
             <TabsTrigger value="scouting" className="flex-none px-3 pb-3"><Radio /> Adversaires</TabsTrigger>
             <TabsTrigger value="imports" className="flex-none px-3 pb-3"><FileSearch /> Imports</TabsTrigger>
@@ -474,9 +532,11 @@ export function PerformanceApp() {
             <TabsTrigger value="data" className="flex-none px-3 pb-3"><Database /> Données</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="team"><TeamPanel metrics={metrics} match={match} history={teamHistory} /></TabsContent>
+          <TabsContent value="live"><LiveMatchPanel matches={liveMatches} onOpenMatch={(selected) => selectJlMatch(selected)} /></TabsContent>
+          <TabsContent value="match"><div className="space-y-5"><JlMatchPicker matches={teamHistory} selectedId={selectedJlMatchId} onSelect={(selected) => selectJlMatch(selected)} /><TeamPanel metrics={metrics} match={match} history={teamHistory} /></div></TabsContent>
+          <TabsContent value="history"><JlHistoryPanel matches={teamHistory} onOpenMatch={(selected) => selectJlMatch(selected)} /></TabsContent>
           <TabsContent value="scouting"><ScoutingPanel matches={scoutingMatches} selectedId={selectedScoutingId} onSelect={setSelectedScoutingId} /></TabsContent>
-          <TabsContent value="imports"><ImportWorkflow draft={ocrDraft} sourceName={importSource.name} busy={importBusy} progress={importProgress} message={importMessage} onDraftChange={setOcrDraft} onValidate={validateScoutingImport} /></TabsContent>
+          <TabsContent value="imports"><ImportWorkflow draft={ocrDraft} sourceName={importSource.name} busy={importBusy} progress={importProgress} message={importMessage} analysisType={importAnalysisType} analyzedSide={importAnalyzedSide} detectedJlSide={detectedJlSide} onDraftChange={setOcrDraft} onAnalysisTypeChange={setImportAnalysisType} onAnalyzedSideChange={setImportAnalyzedSide} onValidate={validateImport} /></TabsContent>
           <TabsContent value="players">
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
               <section className="panel overflow-hidden">
@@ -507,7 +567,7 @@ export function PerformanceApp() {
 
           <TabsContent value="references">
             <div className="grid gap-5 lg:grid-cols-2">
-              <section className="panel p-6"><p className="eyebrow">Convention collective</p><h2 className="mt-2 text-2xl font-black">FGAST% et AST Ratio</h2><div className="mt-5 space-y-4 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">FGAST%</strong> mesure la part des tirs réussis qui ont été assistés. Sur ce match : <span className="font-bold text-stone-950">15 AST / 22 FGM = {formatMetric(metrics.fgast)}%</span>.</p><p>Les tirs à 3 points sont inclus dans les <strong className="text-stone-950">FGM</strong>. Les lancers francs ne sont pas des paniers de champ et n’entrent donc pas dans ce ratio.</p><p><strong className="text-stone-950">AST Ratio</strong> rapporte les passes aux possessions estimées : <span className="font-bold text-stone-950">{formatMetric(metrics.astRatio)}</span> passes pour 100 possessions.</p></div></section>
+              <section className="panel p-6"><p className="eyebrow">Convention collective</p><h2 className="mt-2 text-2xl font-black">FGAST% et AST Ratio</h2><div className="mt-5 space-y-4 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">FGAST%</strong> mesure la part des tirs réussis qui ont été assistés. Sur ce match : <span className="font-bold text-stone-950">{match.team.ast} AST / {match.team.fgm} FGM = {formatMetric(metrics.fgast)}%</span>.</p><p>Les tirs à 3 points sont inclus dans les <strong className="text-stone-950">FGM</strong>. Les lancers francs ne sont pas des paniers de champ et n’entrent donc pas dans ce ratio.</p><p><strong className="text-stone-950">AST Ratio</strong> rapporte les passes aux possessions estimées : <span className="font-bold text-stone-950">{formatMetric(metrics.astRatio)}</span> passes pour 100 possessions.</p></div></section>
               <section className="panel p-6"><p className="eyebrow">Convention individuelle</p><h2 className="mt-2 text-2xl font-black">AST% contextualisé par les minutes</h2><div className="mt-5 bg-stone-950 p-5 font-mono text-sm leading-7 text-white">AST% = 100 × AST /<br />[(MP / 40 × Tm FGM) − FGM]</div><p className="mt-4 text-sm leading-6 text-stone-600">Ce calcul explique pourquoi deux passes peuvent représenter une part élevée si le joueur a peu joué et si ses coéquipiers ont marqué peu de paniers pendant son temps estimé.</p></section>
               <section className="panel p-6 lg:col-span-2"><div className="flex items-center gap-2"><Target className="size-5 text-[#d71920]" /><h2 className="text-xl font-black">Référentiels disponibles</h2></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(playerReferences).map(([id, reference]) => { const player = match.players.find((item) => item.id === id) ?? genevaMatch.players.find((item) => item.id === id); return <div key={id} className="border border-stone-200 bg-stone-50 p-4"><div className="font-bold">{player?.name ?? id}</div><div className="mt-1 text-xs text-stone-500">{reference.season}</div><div className="mt-3 text-xs text-stone-600">{Object.keys(reference.targets).length} indicateurs ciblés</div></div>; })}</div></section>
             </div>
