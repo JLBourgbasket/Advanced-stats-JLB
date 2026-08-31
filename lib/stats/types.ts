@@ -49,6 +49,12 @@ export type MatchBoxscore = {
   opponent: RawTeamBoxscore;
   players: RawPlayerBoxscore[];
   quarters: { label: string; team: number; opponent: number }[];
+  analysisType?: "jl" | "scouting";
+  sourceType?: "import" | "live";
+  liveStatus?: "scheduled" | "live" | "final";
+  provider?: "manual" | "synergy" | "sportradar";
+  externalMatchId?: string | null;
+  lastSyncedAt?: string | null;
 };
 
 export type MetricTarget = {
