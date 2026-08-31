@@ -1,5 +1,20 @@
 # Connexion des statistiques live
 
+## Destination dans l’application
+
+Un match alimenté par Synergy ou Sportradar doit être enregistré avec :
+
+- `analysis_type = 'jl'` ;
+- `source_type = 'live'` ;
+- `live_status = 'scheduled'`, puis `live`, puis `final` ;
+- `provider = 'synergy'` ou `sportradar` ;
+- `external_match_id` égal à l’identifiant officiel du fournisseur ;
+- `last_synced_at` mis à jour à chaque snapshot.
+
+La vue **Live** ne montre que les rencontres `scheduled` ou `live`. Au passage
+à `final`, le match reste disponible dans **Match JL** et rejoint
+automatiquement les agrégations de l’onglet **Historique**.
+
 ## Ce qui est techniquement possible
 
 L’application peut recevoir des statistiques en direct, les convertir vers son
