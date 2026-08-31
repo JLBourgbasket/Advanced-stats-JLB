@@ -26,6 +26,9 @@ de validation.
 - espace « Scouting adversaires » avec rapports collectifs et individuels,
   codes couleur menace/opportunité, historique Supabase et moyennes sur 1, 3,
   5 ou 10 matchs disponibles.
+- rapport adverse complet : synthèse automatique, clés du plan de match JL,
+  Four Factors, profil de tirs, score par quart-temps, tendances ORtg/DRtg,
+  cartographie usage–efficacité et tableau individuel étendu.
 
 ## Installation
 
