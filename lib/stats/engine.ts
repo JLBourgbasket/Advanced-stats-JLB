@@ -24,6 +24,7 @@ export function calculateTeamMetrics(match: MatchBoxscore): TeamMetrics {
   const twoPm = team.fgm - team.threePm;
   const twoPa = team.fga - team.threePa;
   const opponentTwoPa = opponent.fga - opponent.threePa;
+  const fgastRaw = safeRate(team.ast, team.fgm);
 
   return {
     possessions,
@@ -36,7 +37,9 @@ export function calculateTeamMetrics(match: MatchBoxscore): TeamMetrics {
     ftr: safeRate(team.fta, team.fga),
     orb: safeRate(team.orb, team.orb + opponent.drb),
     drb: safeRate(team.drb, team.drb + opponent.orb),
-    fgast: safeRate(team.ast, team.fgm),
+    fgast: Math.min(100, fgastRaw),
+    fgastRaw,
+    fgastValid: team.ast <= team.fgm,
     astRatio: safeRate(team.ast, possessions),
     astTov: team.tov > 0 ? team.ast / team.tov : team.ast,
     tov: safeRate(team.tov, team.fga + 0.44 * team.fta + team.tov),
@@ -93,6 +96,8 @@ export function calculatePlayerMetrics(match: MatchBoxscore): PlayerMetrics[] {
             (mp * teamUsageDenominator)
           : 0,
       astPct: teammateFieldGoals > 0 ? safeRate(player.ast, teammateFieldGoals) : 0,
+      estimatedTeammateFieldGoals: Math.max(0, teammateFieldGoals),
+      astPctLowSample: teammateFieldGoals < 10,
       tovPct: usedPossessions > 0 ? safeRate(player.tov, usedPossessions) : null,
       orbPct: safeRate(player.orb, share * (team.orb + opponent.drb)),
       drbPct: safeRate(player.drb, share * (team.drb + opponent.orb)),
