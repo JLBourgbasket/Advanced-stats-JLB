@@ -36,6 +36,9 @@ de validation.
 - rapport adverse complet : synthèse automatique, clés du plan de match JL,
   Four Factors, profil de tirs, score par quart-temps, tendances ORtg/DRtg,
   cartographie usage–efficacité et tableau individuel étendu.
+- suppression administrateur d’un match JL ou d’un rapport adverse, avec
+  confirmation irréversible ; les boxscores, lignes joueurs, rapports et
+  documents source associés sont retirés des historiques et des agrégations.
 
 ## Installation
 
@@ -86,6 +89,10 @@ Les migrations Supabase sont disponibles dans `supabase/migrations/` :
 
 Les troisième et quatrième migrations doivent être exécutées avant la mise en
 production des modules de scouting et de live.
+
+La suppression d’un match ne nécessite pas de migration supplémentaire : les
+tables dépendantes utilisent déjà `ON DELETE CASCADE` et la politique RLS
+« Admin matches » réserve l’opération aux administrateurs.
 
 Après la seconde migration, ajouter l’administrateur uniquement depuis le SQL
 Editor Supabase, sans publier son adresse dans GitHub :
