@@ -86,7 +86,12 @@ export type TeamMetrics = {
   ftr: number;
   orb: number;
   drb: number;
+  /** Valeur exploitable par les jauges, limitée à la plage physique 0–100 %. */
   fgast: number;
+  /** Ratio brut AST / FGM, conservé pour contrôler la donnée source. */
+  fgastRaw: number;
+  /** Faux lorsque la source déclare davantage de passes que de paniers réussis. */
+  fgastValid: boolean;
   astRatio: number;
   astTov: number;
   tov: number;
@@ -108,6 +113,8 @@ export type PlayerMetrics = RawPlayerBoxscore & {
   efg: number | null;
   usg: number;
   astPct: number;
+  estimatedTeammateFieldGoals: number;
+  astPctLowSample: boolean;
   tovPct: number | null;
   orbPct: number;
   drbPct: number;
