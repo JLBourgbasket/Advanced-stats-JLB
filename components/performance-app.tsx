@@ -52,7 +52,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
-import { draftToMatch, extractLnbBoxscore, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
+import { draftToMatch, extractLnbBoxscore, validateOcrDraftForPublication, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
 import { loadLatestPublishedMatch, loadLiveMatches, loadPublishedMatches, loadScoutingMatches, saveImportedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
 import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
 import { detectJlBourgSide, type BoxscoreSide } from "@/lib/teams/jl-bourg";
@@ -446,6 +446,11 @@ export function PerformanceApp() {
 
   const validateImport = async (analysisType: "jl" | "scouting", side: BoxscoreSide) => {
     if (!ocrDraft) return;
+    const publicationIssues = validateOcrDraftForPublication(ocrDraft, side);
+    if (publicationIssues.length > 0) {
+      setImportMessage(`Publication bloquée : ${publicationIssues.join(" ")}`);
+      return;
+    }
     setImportBusy(true);
     setImportMessage(`Enregistrement du ${analysisType === "jl" ? "match JL Bourg" : "rapport de scouting"} dans Supabase…`);
     try {
