@@ -32,6 +32,7 @@ import {
 } from "recharts";
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DeleteMatchButton } from "@/components/delete-match-button";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, parseMinutes } from "@/lib/stats/engine";
 import type { MatchBoxscore, PlayerMetrics, RawPlayerBoxscore, RawTeamBoxscore, TeamMetrics } from "@/lib/stats/types";
 
@@ -170,7 +171,7 @@ function playerRole(player: AggregatedPlayer) {
   return "Rotation à surveiller";
 }
 
-export function ScoutingPanel({ matches, selectedId, onSelect }: { matches: MatchBoxscore[]; selectedId: string; onSelect: (id: string) => void }) {
+export function ScoutingPanel({ matches, selectedId, onSelect, canDelete = false, onDelete }: { matches: MatchBoxscore[]; selectedId: string; onSelect: (id: string) => void; canDelete?: boolean; onDelete?: (match: MatchBoxscore) => void }) {
   const [sampleSize, setSampleSize] = useState<SampleSize>(1);
   const match = matches.find((item) => item.id === selectedId) ?? matches[0];
   const availableForTeam = match ? matches.filter((item) => item.team.name === match.team.name) : [];
@@ -201,7 +202,7 @@ export function ScoutingPanel({ matches, selectedId, onSelect }: { matches: Matc
   const totalScoring = Math.max(1, twoPointPoints + threePointPoints + team.ftm);
 
   return <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-    <aside className="panel print-hidden h-fit p-4 xl:sticky xl:top-5"><p className="eyebrow">Rapports disponibles</p><div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto">{matches.map((item) => <button key={item.id} onClick={() => onSelect(item.id)} className={`w-full border p-3 text-left ${item.id === match.id ? "border-[#d71920] bg-red-50" : "border-stone-200 hover:bg-stone-50"}`}><div className="font-bold">{item.team.name}</div><div className="mt-1 text-xs text-stone-500">vs {item.opponent.name} · {item.date.split("-").reverse().join("/")}</div></button>)}</div></aside>
+    <aside className="panel print-hidden h-fit p-4 xl:sticky xl:top-5"><p className="eyebrow">Rapports disponibles</p><div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto">{matches.map((item) => <div key={item.id} className={`flex items-start border ${item.id === match.id ? "border-[#d71920] bg-red-50" : "border-stone-200 hover:bg-stone-50"}`}><button type="button" onClick={() => onSelect(item.id)} className="min-w-0 flex-1 p-3 text-left"><div className="font-bold">{item.team.name}</div><div className="mt-1 text-xs text-stone-500">vs {item.opponent.name} · {item.date.split("-").reverse().join("/")}</div></button>{canDelete && onDelete && <div className="p-1.5"><DeleteMatchButton label={`${item.team.name} contre ${item.opponent.name}`} onDelete={() => onDelete(item)} /></div>}</div>)}</div></aside>
 
     <div className="space-y-5">
       <section className="panel p-5 sm:p-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Rapport de scouting · {sample.length} match{sample.length > 1 ? "s" : ""}</p><h2 className="mt-2 text-3xl font-black">{match.team.name}</h2><p className="mt-1 text-sm text-stone-500">Match sélectionné : vs {match.opponent.name} · {match.competition}</p></div><div className="text-right"><div className="font-condensed text-4xl font-black">{match.team.points}–{match.opponent.points}</div><div className="mt-1 text-xs text-stone-500">{match.date.split("-").reverse().join("/")}</div></div></div><div className="print-hidden mt-5 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4"><span className="mr-2 text-xs font-bold text-stone-500">ÉCHANTILLON</span>{([1, 3, 5, 10] as const).map((size) => { const disabled = availableForTeam.length < size; return <button key={size} disabled={disabled} onClick={() => setSampleSize(size)} className={`border px-3 py-1 text-xs font-bold ${sampleSize === size ? "border-stone-950 bg-stone-950 text-white" : "border-stone-300 bg-white"} ${disabled ? "cursor-not-allowed opacity-35" : ""}`}>{size} match{size > 1 ? "s" : ""}</button>; })}<span className="ml-auto text-xs text-stone-500">Moyennes pondérées sur les matchs disponibles.</span></div></section>
