@@ -122,5 +122,8 @@ La première version reconnaît les images PNG/JPEG du format de tableau LNB
 utilisé pour Chalon/Saône–Dijon. Tesseract s’exécute dans le navigateur : le
 document n’est pas envoyé à un service OCR tiers. Les totaux, les deux équipes,
 les quart-temps et les lignes joueurs sont proposés dans un écran de validation.
+Le mode tableau pleine page est également validé sur Cholet–Nanterre. La
+publication est bloquée si les noms, scores, tirs ou lignes joueurs nécessaires
+au calcul n’ont pas été reconnus.
 Les PDF natifs restent stockés, mais devront être convertis en image avant OCR
 jusqu’à l’ajout du rendu automatique des pages PDF.
