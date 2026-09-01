@@ -49,6 +49,7 @@ function consistencyMessages(draft: OcrBoxscoreDraft, side: "home" | "away") {
   messages.push({ good: playerPoints === subject.team.points, text: `Somme des points joueurs : ${playerPoints}/${subject.team.points}` });
   messages.push({ good: Math.abs(playerMinutes - 200) <= 2, text: `Somme des minutes : ${playerMinutes}/200` });
   messages.push({ good: subject.team.fgm <= subject.team.fga && subject.team.threePm <= subject.team.threePa && subject.team.ftm <= subject.team.fta, text: "Tirs réussis ≤ tirs tentés" });
+  messages.push({ good: subject.team.ast <= subject.team.fgm, text: `Passes décisives ≤ paniers réussis : ${subject.team.ast}/${subject.team.fgm}` });
   return messages;
 }
 
