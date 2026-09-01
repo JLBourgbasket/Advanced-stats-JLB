@@ -147,5 +147,7 @@ export function metricStatus(value: number | null, target?: MetricTarget): Metri
 }
 
 export function formatMetric(value: number | null, digits = 1) {
-  return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+  if (value === null || !Number.isFinite(value)) return "—";
+  const locale = typeof document !== "undefined" && document.documentElement.lang === "en" ? "en-US" : "fr-FR";
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }
