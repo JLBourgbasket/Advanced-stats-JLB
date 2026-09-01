@@ -192,7 +192,9 @@ function Box({ label, value }: { label: string; value: string }) {
 }
 
 function TeamPanel({ metrics, match, history }: { metrics: TeamMetrics; match: MatchBoxscore; history: MatchBoxscore[] }) {
-  const statuses = teamTargets.map((target) => metricStatus(metricValue(metrics, target.key), target));
+  const statuses = teamTargets
+    .filter((target) => target.key !== "fgast" || metrics.fgastValid)
+    .map((target) => metricStatus(metricValue(metrics, target.key), target));
   const good = statuses.filter((status) => status === "good").length;
   const red = statuses.filter((status) => status === "bad").length;
   const reading = metrics.drtg <= 110 && metrics.ortg >= 115
@@ -205,6 +207,7 @@ function TeamPanel({ metrics, match, history }: { metrics: TeamMetrics; match: M
 
   return (
     <div className="space-y-5">
+      {!metrics.fgastValid && <section className="border-l-4 border-amber-500 bg-amber-50 p-4 text-sm text-amber-950"><div className="flex items-center gap-2 font-black"><CircleAlert className="size-4" /> FGAST% non interprétable</div><p className="mt-1 leading-6">La source indique {match.team.ast} passes décisives pour {match.team.fgm} paniers réussis, soit un ratio brut de {formatMetric(metrics.fgastRaw)}%. La valeur est conservée pour contrôle, mais exclue de la lecture de performance.</p></section>}
       <section className="grid gap-4 lg:grid-cols-[1.15fr_.85fr]">
         <article className="panel p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -251,7 +254,9 @@ function TeamPanel({ metrics, match, history }: { metrics: TeamMetrics; match: M
           <p className="hidden text-xs text-stone-500 sm:block">vert = atteint · orange = proche · rouge = écart</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {teamTargets.map((target) => <MetricGauge key={target.key} target={target} value={metricValue(metrics, target.key)} />)}
+          {teamTargets.map((target) => target.key === "fgast" && !metrics.fgastValid
+            ? <article key={target.key} className="border border-amber-200 bg-amber-50 p-4 text-amber-950"><div className="text-xs font-black uppercase tracking-[0.1em]">FGAST%</div><div className="mt-3 text-3xl font-black">À contrôler</div><p className="mt-2 text-xs">Ratio brut {formatMetric(metrics.fgastRaw)}% · donnée source incohérente</p></article>
+            : <MetricGauge key={target.key} target={target} value={metricValue(metrics, target.key)} />)}
         </div>
       </section>
 
@@ -547,10 +552,10 @@ export function PerformanceApp() {
               <section className="panel overflow-hidden">
                 <div className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 p-5">
                   <div><p className="eyebrow">Rotation · {players.length} joueurs</p><h2 className="mt-1 text-xl font-black">Performance individuelle</h2></div>
-                  <p className="max-w-md text-xs leading-5 text-stone-500">AST% = part estimée des paniers des coéquipiers assistés pendant les minutes du joueur. Cliquez une ligne pour le détail.</p>
+                  <p className="max-w-md text-xs leading-5 text-stone-500">AST% estim. contextualise les passes par les minutes sans connaître les rotations réelles. Sur un match isolé, privilégiez AST et AST/40.</p>
                 </div>
                 <Table>
-                  <TableHeader><TableRow className="bg-stone-50"><TableHead>Joueur</TableHead><TableHead className="text-right">MIN</TableHead><TableHead className="text-right">PTS</TableHead><TableHead className="text-right">TS%</TableHead><TableHead className="text-right">USG%</TableHead><TableHead className="text-right">AST%</TableHead><TableHead className="text-right">TOV%</TableHead><TableHead className="text-right">ORtg*</TableHead><TableHead className="text-right">DRtg*</TableHead><TableHead /></TableRow></TableHeader>
+                  <TableHeader><TableRow className="bg-stone-50"><TableHead>Joueur</TableHead><TableHead className="text-right">MIN</TableHead><TableHead className="text-right">PTS</TableHead><TableHead className="text-right">TS%</TableHead><TableHead className="text-right">USG%</TableHead><TableHead className="text-right">AST</TableHead><TableHead className="text-right">AST% estim.</TableHead><TableHead className="text-right">TOV%</TableHead><TableHead className="text-right">ORtg*</TableHead><TableHead className="text-right">DRtg*</TableHead><TableHead /></TableRow></TableHeader>
                   <TableBody>
                     {players.map((player) => {
                       const ref = playerReferences[player.id];
@@ -558,7 +563,7 @@ export function PerformanceApp() {
                       return (
                         <TableRow key={player.id} onClick={() => setSelectedPlayerId(player.id)} data-state={player.id === selectedPlayer.id ? "selected" : undefined} className="cursor-pointer">
                           <TableCell><div className="flex items-center gap-3"><span className={`size-2 shrink-0 rounded-full ${statusStyles[primaryStatus].dot}`} /><div><div className="font-bold">{player.name}</div><div className="max-w-[180px] truncate text-[10px] text-stone-400">{player.role}</div></div></div></TableCell>
-                          <TableCell className="text-right tabular-nums">{player.minutes}</TableCell><TableCell className="text-right font-bold tabular-nums">{player.points}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.ts)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.usg)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.astPct)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.tovPct)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.ortgEstimate)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.drtgEstimate)}</TableCell><TableCell><ChevronRight className="size-4 text-stone-400" /></TableCell>
+                          <TableCell className="text-right tabular-nums">{player.minutes}</TableCell><TableCell className="text-right font-bold tabular-nums">{player.points}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.ts)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.usg)}</TableCell><TableCell className="text-right font-bold tabular-nums">{player.ast}</TableCell><TableCell className={`text-right tabular-nums ${player.astPctLowSample ? "bg-amber-50 text-amber-800" : ""}`} title={`Estimation sur ${formatMetric(player.estimatedTeammateFieldGoals, 2)} paniers de coéquipiers`}><span aria-hidden="true">~</span>{formatMetric(player.astPct)}{player.astPctLowSample ? " ⚠" : ""}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.tovPct)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.ortgEstimate)}</TableCell><TableCell className="text-right tabular-nums">{formatMetric(player.drtgEstimate)}</TableCell><TableCell><ChevronRight className="size-4 text-stone-400" /></TableCell>
                         </TableRow>
                       );
                     })}
@@ -572,8 +577,8 @@ export function PerformanceApp() {
 
           <TabsContent value="references">
             <div className="grid gap-5 lg:grid-cols-2">
-              <section className="panel p-6"><p className="eyebrow">Convention collective</p><h2 className="mt-2 text-2xl font-black">FGAST% et AST Ratio</h2><div className="mt-5 space-y-4 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">FGAST%</strong> mesure la part des tirs réussis qui ont été assistés. Sur ce match : <span className="font-bold text-stone-950">{match.team.ast} AST / {match.team.fgm} FGM = {formatMetric(metrics.fgast)}%</span>.</p><p>Les tirs à 3 points sont inclus dans les <strong className="text-stone-950">FGM</strong>. Les lancers francs ne sont pas des paniers de champ et n’entrent donc pas dans ce ratio.</p><p><strong className="text-stone-950">AST Ratio</strong> rapporte les passes aux possessions estimées : <span className="font-bold text-stone-950">{formatMetric(metrics.astRatio)}</span> passes pour 100 possessions.</p></div></section>
-              <section className="panel p-6"><p className="eyebrow">Convention individuelle</p><h2 className="mt-2 text-2xl font-black">AST% contextualisé par les minutes</h2><div className="mt-5 bg-stone-950 p-5 font-mono text-sm leading-7 text-white">AST% = 100 × AST /<br />[(MP / 40 × Tm FGM) − FGM]</div><p className="mt-4 text-sm leading-6 text-stone-600">Ce calcul explique pourquoi deux passes peuvent représenter une part élevée si le joueur a peu joué et si ses coéquipiers ont marqué peu de paniers pendant son temps estimé.</p></section>
+              <section className="panel p-6"><p className="eyebrow">Convention collective</p><h2 className="mt-2 text-2xl font-black">FGAST% et AST Ratio</h2><div className="mt-5 space-y-4 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">FGAST%</strong> mesure la part des tirs réussis qui ont été assistés. Sur ce match : <span className="font-bold text-stone-950">{match.team.ast} AST / {match.team.fgm} FGM = {formatMetric(metrics.fgastRaw)}%</span>. {!metrics.fgastValid && <span className="font-bold text-amber-700"> Cette valeur dépasse la limite physique de 100% : elle est signalée comme incohérence source et n’est pas interprétée.</span>}</p><p>Les tirs à 3 points sont inclus dans les <strong className="text-stone-950">FGM</strong>. Les lancers francs ne sont pas des paniers de champ et n’entrent donc pas dans ce ratio.</p><p><strong className="text-stone-950">AST Ratio</strong> rapporte les passes aux possessions estimées : <span className="font-bold text-stone-950">{formatMetric(metrics.astRatio)}</span> passes pour 100 possessions.</p></div></section>
+              <section className="panel p-6"><p className="eyebrow">Convention individuelle</p><h2 className="mt-2 text-2xl font-black">AST% estimé par les minutes</h2><div className="mt-5 bg-stone-950 p-5 font-mono text-sm leading-7 text-white">AST% estim. = 100 × AST /<br />[(MP / 40 × Tm FGM) − FGM]</div><p className="mt-4 text-sm leading-6 text-stone-600">Sans rotations ni play-by-play, le dénominateur répartit les paniers collectifs au prorata des minutes. Une valeur très élevée sur un match court peut donc être mathématiquement correcte mais très volatile. L’application affiche désormais les passes brutes et l’AST/40 à côté de cette estimation.</p></section>
               <section className="panel p-6 lg:col-span-2"><div className="flex items-center gap-2"><Target className="size-5 text-[#d71920]" /><h2 className="text-xl font-black">Référentiels disponibles</h2></div><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Object.entries(playerReferences).map(([id, reference]) => { const player = match.players.find((item) => item.id === id) ?? genevaMatch.players.find((item) => item.id === id); return <div key={id} className="border border-stone-200 bg-stone-50 p-4"><div className="font-bold">{player?.name ?? id}</div><div className="mt-1 text-xs text-stone-500">{reference.season}</div><div className="mt-3 text-xs text-stone-600">{Object.keys(reference.targets).length} indicateurs ciblés</div></div>; })}</div></section>
             </div>
           </TabsContent>
