@@ -42,7 +42,8 @@ function cleanTeamName(value: string) {
 }
 
 function numericToken(value: string) {
-  const cleaned = value.replace(/[“”‘’'",;:]/g, "").trim();
+  const cleaned = value.replace(/[“”‘’'",;:.°]/g, "").trim();
+  if (/^(?:o+|i\)|l\)|\(\)|10\))$/i.test(cleaned)) return 0;
   if (/^[\[({]?[4J][\])}]?$/.test(cleaned) && !/^[4]$/.test(cleaned)) return 0;
   if (/^1M$/i.test(cleaned)) return 11;
   if (/^\d+$/.test(cleaned)) return Number(cleaned);
@@ -53,6 +54,8 @@ function normalizeLine(line: string) {
   return line
     .replace(/[–—]/g, "-")
     .replace(/[“”‘’]/g, "")
+    .replace(/\b[Oo]-([0-9]+)\b/g, "0-$1")
+    .replace(/\b([0-9]+)-[Oo]\b/g, "$1-0")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -64,14 +67,14 @@ function parsePlayerLine(source: string): RawPlayerBoxscore | null {
 
   const prefix = line.slice(0, pairs[0].index).trim().split(" ");
   if (prefix.length < 4) return null;
-  const points = numericToken(prefix.at(-1) ?? "");
+  const readPoints = numericToken(prefix.at(-1) ?? "");
   const minutes = numericToken(prefix.at(-2) ?? "");
-  if (points === null || minutes === null) return null;
+  if (readPoints === null || minutes === null) return null;
 
   let nameEnd = prefix.length - 2;
   if (/^x+$/i.test(prefix[nameEnd - 1] ?? "")) nameEnd -= 1;
   const jersey = numericToken(prefix[0]) ?? prefix[0];
-  const name = prefix.slice(1, nameEnd).join(" ").replace(/^['"]|['"]$/g, "").trim();
+  const name = prefix.slice(1, nameEnd).join(" ").replace(/^['"]|['"]$/g, "").replace(/[.,]+$/g, "").trim();
   if (!name) return null;
 
   const afterFreeThrows = line.slice((pairs[2].index ?? 0) + pairs[2][0].length);
@@ -82,6 +85,11 @@ function parsePlayerLine(source: string): RawPlayerBoxscore | null {
   if (fields.length < 8) return null;
   while (fields.length < 11) fields.push(0);
   const stats = fields.slice(-11);
+  const fgm = Number(pairs[0][1]);
+  const threePm = Number(pairs[1][1]);
+  const ftm = Number(pairs[2][1]);
+  const inferredPoints = 2 * fgm + threePm + ftm;
+  const points = inferredPoints >= 0 ? inferredPoints : readPoints;
 
   return {
     id: `${slug(name)}-${jersey}`,
@@ -89,11 +97,11 @@ function parsePlayerLine(source: string): RawPlayerBoxscore | null {
     role: "Adversaire",
     minutes: `${minutes}:00`,
     points,
-    fgm: Number(pairs[0][1]),
+    fgm,
     fga: Number(pairs[0][2]),
-    threePm: Number(pairs[1][1]),
+    threePm,
     threePa: Number(pairs[1][2]),
-    ftm: Number(pairs[2][1]),
+    ftm,
     fta: Number(pairs[2][2]),
     orb: stats[0],
     drb: stats[1],
@@ -225,6 +233,23 @@ export function parseLnbOcrText(text: string, confidence = 0): OcrBoxscoreDraft 
   };
 }
 
+export function validateOcrDraftForPublication(draft: OcrBoxscoreDraft, analyzedSide: "home" | "away") {
+  const issues: string[] = [];
+  const subjects = [draft.home, draft.away];
+  for (const subject of subjects) {
+    if (/^Équipe (?:domicile|visiteuse)$/i.test(subject.name)) issues.push(`Nom de l’équipe ${subject.name.toLowerCase()} non reconnu.`);
+    if (subject.team.points <= 0 || subject.team.fga <= 0) issues.push(`Totaux collectifs manquants pour ${subject.name}.`);
+    const scoreEquation = 2 * subject.team.fgm + subject.team.threePm + subject.team.ftm;
+    if (subject.team.points > 0 && scoreEquation !== subject.team.points) issues.push(`Équation du score incohérente pour ${subject.name} (${scoreEquation}/${subject.team.points}).`);
+  }
+  const analyzed = draft[analyzedSide];
+  if (analyzed.players.filter((player) => Number(player.minutes.split(":")[0] || 0) > 0).length < 5) issues.push(`Moins de cinq joueurs exploitables pour ${analyzed.name}.`);
+  const playerPoints = analyzed.players.reduce((sum, player) => sum + player.points, 0);
+  if (analyzed.team.points > 0 && playerPoints !== analyzed.team.points) issues.push(`Somme des points joueurs incohérente pour ${analyzed.name} (${playerPoints}/${analyzed.team.points}).`);
+  if (draft.quarters.every((quarter) => quarter.home === 0 && quarter.away === 0)) issues.push("Scores par quart-temps non reconnus.");
+  return issues;
+}
+
 export async function extractLnbBoxscore(file: File, onProgress?: (progress: number, status: string) => void) {
   const worker = await createWorker("eng", OEM.LSTM_ONLY, {
     logger: (message: LoggerMessage) => {
@@ -233,7 +258,10 @@ export async function extractLnbBoxscore(file: File, onProgress?: (progress: num
   });
   try {
     await worker.setParameters({
-      tessedit_pageseg_mode: PSM.AUTO,
+      // Les boxscores LNB sont des tableaux pleine page : SINGLE_BLOCK conserve
+      // chaque joueur sur une seule ligne, contrairement à AUTO qui lit parfois
+      // les colonnes séparément.
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
       preserve_interword_spaces: "1",
       user_defined_dpi: "200",
     });
