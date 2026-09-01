@@ -537,6 +537,7 @@ export function PerformanceApp() {
             <div><div className="font-condensed text-lg font-black tracking-[0.04em]">PERFORMANCE LAB</div><div className="text-[10px] uppercase tracking-[0.18em] text-stone-400">JL Bourg · Basketball analytics</div></div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {adminAccess.isAdmin && <span className="inline-flex h-9 items-center gap-2 border border-emerald-700 bg-emerald-950/40 px-3 text-xs font-bold text-emerald-300"><ShieldCheck className="size-4" /> Administration active</span>}
             <label className={`inline-flex h-9 items-center gap-2 border border-stone-700 px-3 text-xs font-bold ${adminAccess.isAdmin ? "cursor-pointer hover:bg-stone-900" : "cursor-not-allowed opacity-50"}`}>
               <Camera className="size-4" /> {adminAccess.isAdmin ? "Prendre une photo" : "Photo admin"}
               <input type="file" className="sr-only" accept="image/*" capture="environment" onChange={(event) => {
@@ -632,7 +633,7 @@ export function PerformanceApp() {
             </div>
           </TabsContent>
 
-          <TabsContent value="data">
+          <TabsContent value="data" forceMount>
             <div className="grid gap-5 lg:grid-cols-[1fr_.8fr]">
               <section className="panel p-6"><p className="eyebrow">Pipeline d’un match</p><h2 className="mt-2 text-2xl font-black">De la feuille au rapport</h2><div className="mt-6 space-y-3">{[
                 [Camera, "1. Import", "Photo mobile normalisée en PDF, PDF natif, CSV ou XLSX"],
