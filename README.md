@@ -109,9 +109,14 @@ au domaine Netlify de production.
 ## Conventions statistiques
 
 - **FGAST% collectif** = `AST / FGM`. Les paniers à trois points sont inclus
-  dans les FGM ; les lancers francs ne sont pas des field goals.
+  dans les FGM ; les lancers francs ne sont pas des field goals. Si `AST > FGM`,
+  le ratio brut est conservé mais signalé comme incohérence de la source et
+  exclu de l’interprétation sportive.
 - **AST% individuel** estime la part des paniers des coéquipiers assistés pendant
-  les minutes du joueur.
+  les minutes du joueur. Sans rotations réelles, le dénominateur est estimé au
+  prorata des minutes. L’interface le marque donc `AST% estim.`, affiche aussi
+  les passes brutes et l’AST/40, et avertit lorsque le dénominateur est inférieur
+  à dix paniers de coéquipiers.
 - Les ORtg/DRtg individuels du MVP sont des estimations fondées sur le boxscore.
   Des ratings réellement « on-court » nécessitent du play-by-play ou des
   données de rotations.
