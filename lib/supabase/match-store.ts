@@ -188,7 +188,13 @@ export async function loadScoutingMatches(limit = 20): Promise<MatchBoxscore[]> 
   if (error?.code === "42703") return [];
   if (error) throw error;
   const matches = await Promise.all((data ?? []).map((row) => loadStoredMatch(row)));
-  return matches.filter((match): match is MatchBoxscore => match !== null);
+  return matches.filter((match): match is MatchBoxscore =>
+    match !== null &&
+    match.team.points > 0 &&
+    match.opponent.points > 0 &&
+    match.team.fga > 0 &&
+    match.opponent.fga > 0,
+  );
 }
 
 export async function saveImportedMatch(
