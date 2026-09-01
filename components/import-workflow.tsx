@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, LoaderCircle, Radio, ScanText, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
+import { validateOcrDraftForPublication, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
 import type { RawPlayerBoxscore, RawTeamBoxscore } from "@/lib/stats/types";
 import type { BoxscoreSide } from "@/lib/teams/jl-bourg";
 
@@ -81,6 +81,7 @@ export function ImportWorkflow({ draft, sourceName, busy, progress, message, ana
     players[index] = { ...players[index], [field]: field === "name" || field === "minutes" ? value : numberValue(value) };
     replaceSide(side, { players });
   };
+  const publicationIssues = validateOcrDraftForPublication(draft, analyzedSide);
 
   return (
     <div className="space-y-5">
@@ -116,7 +117,8 @@ export function ImportWorkflow({ draft, sourceName, busy, progress, message, ana
           <button type="button" onClick={() => onAnalysisTypeChange("scouting")} className={`border p-4 text-left ${analysisType === "scouting" ? "border-stone-950 bg-stone-950 text-white" : "border-stone-300 bg-white"}`}><div className="flex items-center gap-2 font-black"><Radio className="size-4" /> Scouting adversaire</div><p className={`mt-2 text-xs leading-5 ${analysisType === "scouting" ? "text-stone-300" : "text-stone-500"}`}>Le rapport sera classé dans l’espace Adversaires.</p></button>
         </div>
         <div className="mt-5"><div className="text-xs font-bold uppercase tracking-[0.1em] text-stone-500">Équipe analysée</div><div className="mt-2 grid gap-3 sm:grid-cols-2">{(["home", "away"] as const).map((side) => <button type="button" key={side} onClick={() => onAnalyzedSideChange(side)} className={`border p-3 text-left ${analyzedSide === side ? "border-[#d71920] bg-red-50" : "border-stone-300 bg-white"}`}><span className="text-[10px] uppercase tracking-[0.1em] text-stone-400">{side === "home" ? "Domicile" : "Visiteur"}</span><span className="mt-1 block font-black">{draft[side].name}</span></button>)}</div></div>
-        <Button disabled={busy} onClick={() => void onValidate(analysisType, analyzedSide)} className="mt-5 h-auto min-h-14 w-full rounded-none bg-[#d71920] px-5 py-3 text-left hover:bg-[#b71017]"><span><span className="block text-xs font-normal text-red-100">Valider, calculer et publier</span><span className="mt-1 block text-base font-black">{analysisType === "jl" ? "Match JL Bourg" : "Rapport adverse"} · {draft[analyzedSide].name}</span></span></Button>
+        {publicationIssues.length > 0 && <div className="mt-5 border-l-4 border-[#d71920] bg-red-50 p-4 text-sm text-red-950"><div className="flex items-center gap-2 font-black"><AlertTriangle className="size-4" /> Publication bloquée</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{publicationIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul><p className="mt-2 text-xs">Corrigez les cellules concernées ou relancez l’OCR avec une image plus nette.</p></div>}
+        <Button disabled={busy || publicationIssues.length > 0} onClick={() => void onValidate(analysisType, analyzedSide)} className="mt-5 h-auto min-h-14 w-full rounded-none bg-[#d71920] px-5 py-3 text-left hover:bg-[#b71017] disabled:bg-stone-300"><span><span className="block text-xs font-normal text-red-100">Valider, calculer et publier</span><span className="mt-1 block text-base font-black">{analysisType === "jl" ? "Match JL Bourg" : "Rapport adverse"} · {draft[analyzedSide].name}</span></span></Button>
         <p className="mt-3 text-xs text-stone-500">Cette confirmation empêche une erreur OCR de classer silencieusement le match dans la mauvaise section.</p>
       </section>
     </div>
