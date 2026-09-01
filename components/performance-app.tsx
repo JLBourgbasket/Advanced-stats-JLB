@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   Camera,
   CalendarRange,
@@ -16,6 +17,7 @@ import {
   FileUp,
   Gauge,
   Info,
+  LoaderCircle,
   Printer,
   Radio,
   RefreshCw,
@@ -36,6 +38,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { AdminAccess } from "@/components/admin-access";
+import { DeleteMatchButton } from "@/components/delete-match-button";
 import { ImportWorkflow } from "@/components/import-workflow";
 import { JlHistoryPanel } from "@/components/jl-history-panel";
 import { JlPerformanceDeepDive } from "@/components/jl-performance-deep-dive";
@@ -53,7 +56,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { calculatePlayerMetrics, calculateTeamMetrics, formatMetric, metricStatus, type MetricStatus } from "@/lib/stats/engine";
 import { genevaMatch, playerReferences, teamTargets } from "@/lib/stats/demo-data";
 import { draftToMatch, extractLnbBoxscore, validateOcrDraftForPublication, type OcrBoxscoreDraft } from "@/lib/ocr/lnb-boxscore";
-import { loadLatestPublishedMatch, loadLiveMatches, loadPublishedMatches, loadScoutingMatches, saveImportedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
+import { deleteStoredMatch, loadLatestPublishedMatch, loadLiveMatches, loadPublishedMatches, loadScoutingMatches, saveImportedMatch, uploadBoxscoreFile } from "@/lib/supabase/match-store";
 import type { MatchBoxscore, MetricTarget, PlayerMetrics, TeamMetrics } from "@/lib/stats/types";
 import { detectJlBourgSide, type BoxscoreSide } from "@/lib/teams/jl-bourg";
 
@@ -65,6 +68,7 @@ const statusStyles: Record<MetricStatus, { dot: string; text: string; bg: string
 };
 
 const metricValue = (metrics: TeamMetrics, key: string) => metrics[key as keyof TeamMetrics] as number;
+const isStoredMatchId = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
 function targetLabel(target: MetricTarget) {
   if (target.direction === "range") {
@@ -270,8 +274,8 @@ function Insight({ icon, title, value, copy, tone }: { icon: React.ReactNode; ti
   return <div className={`border p-4 ${toneClass}`}><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em]">{icon}{title}</div><div className="mt-3 text-xl font-black tabular-nums">{value}</div><p className="mt-2 text-xs leading-5 opacity-75">{copy}</p></div>;
 }
 
-function JlMatchPicker({ matches, selectedId, onSelect }: { matches: MatchBoxscore[]; selectedId: string; onSelect: (match: MatchBoxscore) => void }) {
-  return <section className="panel print-hidden p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-2"><p className="eyebrow">Rapport individuel</p><h2 className="mt-1 text-lg font-black">Choisir un match JL</h2></div><div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">{matches.map((item) => <button key={item.id} onClick={() => onSelect(item)} className={`min-w-48 border p-3 text-left ${item.id === selectedId ? "border-[#d71920] bg-red-50" : "border-stone-200 bg-white hover:bg-stone-50"}`}><div className="flex items-center justify-between gap-3"><span className="font-bold">vs {item.opponent.name}</span><span className={`font-condensed font-black ${item.team.points > item.opponent.points ? "text-emerald-700" : "text-[#d71920]"}`}>{item.team.points}–{item.opponent.points}</span></div><div className="mt-1 text-[10px] text-stone-500">{item.date.split("-").reverse().join("/")} · {item.sourceType === "live" ? "flux live" : "import"}</div></button>)}</div></div></section>;
+function JlMatchPicker({ matches, selectedId, onSelect, canDelete, onDelete }: { matches: MatchBoxscore[]; selectedId: string; onSelect: (match: MatchBoxscore) => void; canDelete: boolean; onDelete: (match: MatchBoxscore) => void }) {
+  return <section className="panel print-hidden p-4"><div className="flex flex-wrap items-center gap-3"><div className="mr-2"><p className="eyebrow">Rapport individuel</p><h2 className="mt-1 text-lg font-black">Choisir un match JL</h2></div><div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">{matches.map((item) => <div key={item.id} className={`flex min-w-52 items-start border ${item.id === selectedId ? "border-[#d71920] bg-red-50" : "border-stone-200 bg-white hover:bg-stone-50"}`}><button type="button" onClick={() => onSelect(item)} className="min-w-0 flex-1 p-3 text-left"><div className="flex items-center justify-between gap-3"><span className="font-bold">vs {item.opponent.name}</span><span className={`font-condensed font-black ${item.team.points > item.opponent.points ? "text-emerald-700" : "text-[#d71920]"}`}>{item.team.points}–{item.opponent.points}</span></div><div className="mt-1 text-[10px] text-stone-500">{item.date.split("-").reverse().join("/")} · {item.sourceType === "live" ? "flux live" : "import"}</div></button>{canDelete && isStoredMatchId(item.id) && <div className="p-1.5"><DeleteMatchButton label={`${item.team.name} contre ${item.opponent.name}`} onDelete={() => onDelete(item)} /></div>}</div>)}</div></div></section>;
 }
 
 export function PerformanceApp() {
@@ -293,6 +297,9 @@ export function PerformanceApp() {
   const [liveMatches, setLiveMatches] = useState<MatchBoxscore[]>([]);
   const [selectedJlMatchId, setSelectedJlMatchId] = useState(genevaMatch.id);
   const [selectedScoutingId, setSelectedScoutingId] = useState("");
+  const [pendingDeletion, setPendingDeletion] = useState<{ match: MatchBoxscore; type: "jl" | "scouting" } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const selectedJlMatchIdRef = useRef(genevaMatch.id);
   const refreshInProgress = useRef(false);
   const metrics = useMemo(() => calculateTeamMetrics(match), [match]);
@@ -449,6 +456,48 @@ export function PerformanceApp() {
     setActiveTab(destination);
   }, []);
 
+  const requestMatchDeletion = useCallback((target: MatchBoxscore, type: "jl" | "scouting") => {
+    if (!adminAccess.isAdmin || !isStoredMatchId(target.id)) return;
+    setDeleteError("");
+    setPendingDeletion({ match: target, type });
+  }, [adminAccess.isAdmin]);
+
+  const confirmMatchDeletion = async () => {
+    if (!pendingDeletion || !adminAccess.isAdmin || deleteBusy) return;
+    const target = pendingDeletion;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      const result = await deleteStoredMatch(target.match.id);
+      setLiveMatches((current) => current.filter((item) => item.id !== target.match.id));
+
+      if (target.type === "jl") {
+        const remaining = teamHistory.filter((item) => item.id !== target.match.id);
+        setTeamHistory(remaining);
+        if (selectedJlMatchIdRef.current === target.match.id) {
+          const next = remaining[0] ?? genevaMatch;
+          setMatch(next);
+          setSelectedJlMatchId(next.id);
+          selectedJlMatchIdRef.current = next.id;
+          setSelectedPlayerId(next.players[0]?.id ?? "");
+        }
+      } else {
+        const remaining = scoutingMatches.filter((item) => item.id !== target.match.id);
+        setScoutingMatches(remaining);
+        if (selectedScoutingId === target.match.id) setSelectedScoutingId(remaining[0]?.id ?? "");
+      }
+
+      setDataMode(result.fileCleanupWarning
+        ? `${target.match.team.name} – ${target.match.opponent.name} supprimé · ${result.fileCleanupWarning}`
+        : `${target.match.team.name} – ${target.match.opponent.name} supprimé définitivement`);
+      setPendingDeletion(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "La suppression a échoué.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   const validateImport = async (analysisType: "jl" | "scouting", side: BoxscoreSide) => {
     if (!ocrDraft) return;
     const publicationIssues = validateOcrDraftForPublication(ocrDraft, side);
@@ -543,9 +592,9 @@ export function PerformanceApp() {
           </TabsList>
 
           <TabsContent value="live"><LiveMatchPanel matches={liveMatches} onOpenMatch={(selected) => selectJlMatch(selected)} /></TabsContent>
-          <TabsContent value="match"><div className="space-y-5"><JlMatchPicker matches={teamHistory} selectedId={selectedJlMatchId} onSelect={(selected) => selectJlMatch(selected)} /><TeamPanel metrics={metrics} match={match} history={teamHistory} /></div></TabsContent>
+          <TabsContent value="match"><div className="space-y-5"><JlMatchPicker matches={teamHistory} selectedId={selectedJlMatchId} onSelect={(selected) => selectJlMatch(selected)} canDelete={adminAccess.isAdmin} onDelete={(selected) => requestMatchDeletion(selected, "jl")} /><TeamPanel metrics={metrics} match={match} history={teamHistory} /></div></TabsContent>
           <TabsContent value="history"><JlHistoryPanel matches={teamHistory} onOpenMatch={(selected) => selectJlMatch(selected)} /></TabsContent>
-          <TabsContent value="scouting"><ScoutingPanel matches={scoutingMatches} selectedId={selectedScoutingId} onSelect={setSelectedScoutingId} /></TabsContent>
+          <TabsContent value="scouting"><ScoutingPanel matches={scoutingMatches} selectedId={selectedScoutingId} onSelect={setSelectedScoutingId} canDelete={adminAccess.isAdmin} onDelete={(selected) => requestMatchDeletion(selected, "scouting")} /></TabsContent>
           <TabsContent value="imports"><ImportWorkflow draft={ocrDraft} sourceName={importSource.name} busy={importBusy} progress={importProgress} message={importMessage} analysisType={importAnalysisType} analyzedSide={importAnalyzedSide} detectedJlSide={detectedJlSide} onDraftChange={setOcrDraft} onAnalysisTypeChange={setImportAnalysisType} onAnalyzedSideChange={setImportAnalyzedSide} onValidate={validateImport} /></TabsContent>
           <TabsContent value="players">
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -604,6 +653,7 @@ export function PerformanceApp() {
           </TabsContent>
         </Tabs>
       </div>
+      {pendingDeletion && <div className="print-hidden fixed inset-0 z-50 grid place-items-center bg-stone-950/70 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleteBusy) setPendingDeletion(null); }}><section role="alertdialog" aria-modal="true" aria-labelledby="delete-match-title" aria-describedby="delete-match-description" className="w-full max-w-lg border border-red-200 bg-white p-6 shadow-2xl"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center bg-red-50 text-[#d71920]"><AlertTriangle className="size-6" /></div><div><p className="eyebrow text-[#d71920]">Suppression définitive</p><h2 id="delete-match-title" className="mt-1 text-2xl font-black">Supprimer ce match ?</h2></div></div><div id="delete-match-description" className="mt-5 space-y-3 text-sm leading-6 text-stone-600"><p><strong className="text-stone-950">{pendingDeletion.match.team.name} – {pendingDeletion.match.opponent.name}</strong><br />{pendingDeletion.match.date.split("-").reverse().join("/")} · {pendingDeletion.match.competition}</p><p className="border-l-4 border-[#d71920] bg-red-50 p-4 text-red-950">Cette action supprimera le match, ses lignes joueurs, son boxscore collectif et son rapport. Il sera immédiatement retiré des historiques et des moyennes de référence. Cette opération est irréversible.</p></div>{deleteError && <div className="mt-4 border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">{deleteError}</div>}<div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button type="button" variant="outline" disabled={deleteBusy} onClick={() => setPendingDeletion(null)} className="rounded-none">Annuler</Button><Button type="button" disabled={deleteBusy} onClick={() => void confirmMatchDeletion()} className="rounded-none bg-[#d71920] hover:bg-[#a20e14]">{deleteBusy ? <><LoaderCircle className="animate-spin" /> Suppression…</> : "Supprimer définitivement"}</Button></div></section></div>}
     </main>
   );
 }
