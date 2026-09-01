@@ -274,6 +274,44 @@ export async function saveScoutingMatch(match: MatchBoxscore, sourceFilename: st
   return saveImportedMatch(match, "scouting", sourceFilename, sourcePath);
 }
 
+export async function deleteStoredMatch(matchId: string) {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error("Supabase n’est pas configuré.");
+
+  const { data: storedMatch, error: lookupError } = await supabase
+    .from("matches")
+    .select("id, source_path")
+    .eq("id", matchId)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!storedMatch) throw new Error("Ce match n’existe plus ou vous n’êtes pas autorisé à le supprimer.");
+
+  const { data: deleted, error: deleteError } = await supabase
+    .from("matches")
+    .delete()
+    .eq("id", matchId)
+    .select("id")
+    .maybeSingle();
+  if (deleteError) throw deleteError;
+  if (!deleted) throw new Error("Suppression refusée : vérifiez votre accès administrateur.");
+
+  let fileCleanupWarning: string | null = null;
+  const sourcePath = typeof storedMatch.source_path === "string" ? storedMatch.source_path : null;
+  if (sourcePath?.includes("/")) {
+    const folder = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
+    const { data: files, error: listError } = await supabase.storage.from("boxscores").list(folder);
+    if (listError) {
+      fileCleanupWarning = "Le match est supprimé, mais le document source n’a pas pu être nettoyé.";
+    } else if (files && files.length > 0) {
+      const paths = files.map((file) => `${folder}/${file.name}`);
+      const { error: storageError } = await supabase.storage.from("boxscores").remove(paths);
+      if (storageError) fileCleanupWarning = "Le match est supprimé, mais le document source n’a pas pu être nettoyé.";
+    }
+  }
+
+  return { fileCleanupWarning };
+}
+
 export async function uploadBoxscoreFile(file: File, userId: string) {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) throw new Error("Supabase n’est pas configuré.");
