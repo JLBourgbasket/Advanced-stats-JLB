@@ -214,6 +214,11 @@ export function parseLnbOcrText(text: string, confidence = 0): OcrBoxscoreDraft 
   if (totals.length < 2) warnings.push("Totaux collectifs incomplets.");
   if (playersFor(0).length < 5 || playersFor(1).length < 5) warnings.push("Certaines lignes joueurs n’ont pas été reconnues.");
   if (!dateMatch) warnings.push("Date non reconnue : valeur du jour proposée.");
+  for (const team of [homeTeam, awayTeam]) {
+    if (team.ast > team.fgm) {
+      warnings.push(`Passes décisives supérieures aux paniers réussis pour ${team.name} (${team.ast}/${team.fgm}) : donnée source à contrôler.`);
+    }
+  }
 
   return {
     id: crypto.randomUUID(),
